@@ -111,7 +111,7 @@ export function BackupExport() {
         </p>
         <div style={{ marginBottom: '16px', fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.7 }}>
           หุ้น · รอบซื้อ · รายการขาย · เงินปันผล · ฝาก/ถอน · รายการไฟล์ · คลังความรู้
-          <br />ข้อมูลหุ้นรวมเงินปันผลคาดการณ์/ปี · Activity Log จะไม่ถูก Export หรือแทนที่ตอน Restore
+          <br />ข้อมูลหุ้นรวม Risk Category และเงินปันผลคาดการณ์/ปี · Activity Log จะไม่ถูก Export หรือแทนที่ตอน Restore
           <br />ไฟล์อัปโหลดสำรองเฉพาะชื่อ รายละเอียด และลิงก์ ไม่ฝังไฟล์ไบนารีลง JSON
         </div>
         <button className="btn btn-primary" onClick={handleExport} disabled={exporting}>

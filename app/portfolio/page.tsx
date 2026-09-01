@@ -200,7 +200,7 @@ export default function PortfolioPage() {
         ) : (
           <div className="animate-stagger" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div
-              className="stock-grid-layout desktop-only"
+              className="portfolio-stock-grid-layout desktop-only"
               style={{
                 padding: '6px 20px',
                 fontSize: '10px',

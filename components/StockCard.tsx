@@ -45,7 +45,7 @@ export function StockCard({ stock }: StockCardProps) {
 
   return (
     <div
-      className="stock-row stock-grid-layout"
+      className="stock-row portfolio-stock-grid-layout"
       role="link"
       tabIndex={0}
       onClick={openStockDetail}

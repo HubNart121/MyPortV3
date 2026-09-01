@@ -28,6 +28,38 @@ export function createBackupManifest(backup: BackupCollections): BackupManifest 
   };
 }
 
+function sortById<T extends { id: string }>(values: T[]): T[] {
+  return [...values].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function sortObjectKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortObjectKeys);
+  if (!value || typeof value !== 'object') return value;
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, sortObjectKeys(item)]),
+  );
+}
+
+/** Creates an order-independent representation for post-restore data verification. */
+export function getBackupContentSignature(backup: BackupCollections): string {
+  const comparable = {
+    stocks: sortById(backup.stocks).map((stock) => ({
+      ...stock,
+      buy_rounds: sortById(stock.buy_rounds ?? []),
+      realized_trades: sortById(stock.realized_trades ?? []),
+      dividend_payments: sortById(stock.dividend_payments ?? []),
+    })),
+    files: sortById(backup.files ?? []),
+    informations: sortById(backup.informations ?? []),
+    cash_transactions: sortById(backup.cash_transactions ?? []),
+  };
+
+  return JSON.stringify(sortObjectKeys(comparable));
+}
+
 export function completeBackupData(backup: BackupData): BackupData {
   const complete = {
     ...backup,

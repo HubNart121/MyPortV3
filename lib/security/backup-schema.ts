@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { BACKUP_SCHEMA_VERSION } from '@/lib/backup';
-import { RISK_CATEGORY } from '@/lib/types';
+import { BACKUP_SCHEMA_VERSION } from '../backup.ts';
+import { RISK_CATEGORY } from '../types.ts';
 
 const shortText = z.string().max(500);
 const nullableText = z.string().max(10_000).nullable();

@@ -2,7 +2,11 @@ import 'server-only';
 
 import type { DocumentReference } from 'firebase-admin/firestore';
 import type { BackupCategoryCounts, BackupData } from '@/lib/types';
-import { completeBackupData, getBackupCategoryCounts } from '@/lib/backup';
+import {
+  completeBackupData,
+  getBackupCategoryCounts,
+  getBackupContentSignature,
+} from '@/lib/backup';
 import { adminFirestore, firebaseUserForEmail } from './firebase-admin';
 import { exportBackupForUid } from './backup-store';
 
@@ -96,10 +100,15 @@ async function replaceUserBackup(uid: string, backup: BackupData): Promise<void>
   await writeBackupCollections(userRoot, backup);
 }
 
-async function verifiedCounts(uid: string, expected: BackupCategoryCounts): Promise<BackupCategoryCounts> {
-  const actual = getBackupCategoryCounts(await exportBackupForUid(uid));
+async function verifyStoredBackup(uid: string, expectedBackup: BackupData): Promise<BackupCategoryCounts> {
+  const storedBackup = await exportBackupForUid(uid);
+  const expected = getBackupCategoryCounts(expectedBackup);
+  const actual = getBackupCategoryCounts(storedBackup);
   if (!countsEqual(expected, actual)) {
     throw new Error('Stored category counts do not match the restore file');
+  }
+  if (getBackupContentSignature(expectedBackup) !== getBackupContentSignature(storedBackup)) {
+    throw new Error('Stored backup content does not match the restore file');
   }
   return actual;
 }
@@ -167,7 +176,6 @@ export async function restoreJsonBackupForEmail(
   const db = adminFirestore();
   const jobId = db.collection('_system_restore_jobs').doc().id;
   const backup = completeBackupData(input);
-  const expected = getBackupCategoryCounts(backup);
   await acquireRestoreLock(uid, jobId);
 
   let recoveryRef: DocumentReference | null = null;
@@ -178,7 +186,7 @@ export async function restoreJsonBackupForEmail(
     recoveryRef = await createRecoverySnapshot(uid, jobId, currentBackup);
     mutationStarted = true;
     await replaceUserBackup(uid, backup);
-    const counts = await verifiedCounts(uid, expected);
+    const counts = await verifyStoredBackup(uid, backup);
     await recoveryRef.update({ status: 'verified', completed_at: Date.now() });
     await pruneRecoverySnapshots(uid).catch(() => undefined);
     return { counts, recoveryId: jobId };
@@ -187,7 +195,7 @@ export async function restoreJsonBackupForEmail(
 
     try {
       await replaceUserBackup(uid, currentBackup);
-      await verifiedCounts(uid, getBackupCategoryCounts(currentBackup));
+      await verifyStoredBackup(uid, currentBackup);
       await recoveryRef.update({ status: 'rolled_back', completed_at: Date.now() });
       throw new RestoreRolledBackError(jobId);
     } catch (rollbackError) {

@@ -114,7 +114,7 @@ export function JsonRestore({ onRestoreComplete }: { onRestoreComplete?: () => v
       setVerifiedCounts(result.data.counts);
       resetSelection();
       await onRestoreComplete?.();
-      toast.show('Restore และตรวจจำนวนข้อมูลครบทั้ง 7 หมวดแล้ว', 'success');
+      toast.show('Restore และตรวจสอบข้อมูลครบทั้ง 7 หมวดแล้ว', 'success');
     } catch (caught: unknown) {
       const message = caught instanceof Error ? caught.message : 'Restore ข้อมูลไม่สำเร็จ';
       setError(message);
@@ -181,7 +181,7 @@ export function JsonRestore({ onRestoreComplete }: { onRestoreComplete?: () => v
 
         {verifiedCounts && (
           <div className="operation-message operation-success">
-            ✓ Restore สำเร็จและตรวจจำนวนจากฐานข้อมูลแล้ว
+            ✓ Restore สำเร็จและตรวจสอบข้อมูลจากฐานข้อมูลแล้ว
             <CountsGrid counts={verifiedCounts} />
           </div>
         )}
