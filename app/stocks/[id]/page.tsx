@@ -19,7 +19,7 @@ import type { Stock, BuyRound, RealizedTrade, DividendPayment } from '@/lib/type
 import { BuyRoundTable } from '@/components/BuyRoundTable';
 import { DividendTable } from '@/components/DividendTable';
 import type { DividendPaymentFormData } from '@/components/DividendTable';
-import { StatusBadge, AssetBadge, PortBadge, RiskBadge } from '@/components/Badges';
+import { StatusBadge, AssetBadge, CountryBadge, PortBadge, RiskBadge } from '@/components/Badges';
 import { ToastContainer, useToast } from '@/components/Toast';
 import type { BuyRoundFormData } from '@/components/BuyRoundTable';
 import { StockForm } from '@/components/StockForm';
@@ -28,6 +28,7 @@ import { SellModal } from '@/components/SellModal';
 import type { SellFormData } from '@/components/SellModal';
 import { DividendAccumulationChart } from '@/components/DividendAccumulationChart';
 import { ShareStockButton } from '@/components/ShareStockButton';
+import { applyBankAccountMovement } from '@/lib/services/bankAccountService';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -137,10 +138,12 @@ export default function StockDetailPage({ params }: PageProps) {
       gross_amount: gross,
       net_amount: net,
     });
+    await applyBankAccountMovement(raw.port_type as 'Business' | 'Private', net);
     toast.show('บันทึกรับเงินปันผลสำเร็จ', 'success');
     queryClient.invalidateQueries({ queryKey: ['stock', id] });
     queryClient.invalidateQueries({ queryKey: ['portfolio'] });
     queryClient.invalidateQueries({ queryKey: ['all-dividends'] });
+    queryClient.invalidateQueries({ queryKey: ['bank-accounts'] });
   };
 
   const handleEditDividend = async (divId: string, data: DividendPaymentFormData) => {
@@ -154,58 +157,77 @@ export default function StockDetailPage({ params }: PageProps) {
         gross_amount: gross,
         net_amount: net,
       });
+    const previous = dividends.find((item) => item.id === divId);
+    if (previous) await applyBankAccountMovement(raw.port_type as 'Business' | 'Private', -Number(previous.net_amount));
+    await applyBankAccountMovement(raw.port_type as 'Business' | 'Private', net);
     toast.show('แก้ไขรายการปันผลสำเร็จ', 'success');
     queryClient.invalidateQueries({ queryKey: ['stock', id] });
     queryClient.invalidateQueries({ queryKey: ['portfolio'] });
     queryClient.invalidateQueries({ queryKey: ['all-dividends'] });
+    queryClient.invalidateQueries({ queryKey: ['bank-accounts'] });
   };
 
   const handleDeleteDividend = async (divId: string) => {
+    const previous = dividends.find((item) => item.id === divId);
     await deleteStockChild(id, 'dividend_payments', divId);
+    if (previous) await applyBankAccountMovement(raw.port_type as 'Business' | 'Private', -Number(previous.net_amount));
     toast.show('ลบรายการเงินปันผลแล้ว', 'success');
     queryClient.invalidateQueries({ queryKey: ['stock', id] });
     queryClient.invalidateQueries({ queryKey: ['portfolio'] });
     queryClient.invalidateQueries({ queryKey: ['all-dividends'] });
+    queryClient.invalidateQueries({ queryKey: ['bank-accounts'] });
   };
 
   const handleSell = async (data: SellFormData & { profit: number; avg_cost_at_sell: number }) => {
     setSelling(true);
-    await addStockChild<RealizedTrade>(id, 'realized_trades', {
-      sell_date: data.sell_date,
-      shares: data.shares,
-      sell_price: data.sell_price,
-      sell_fee: data.sell_fee,
-      avg_cost_at_sell: data.avg_cost_at_sell,
-      profit: data.profit,
-      port_type: raw.port_type,
-    });
-    setSelling(false);
-    toast.show('บันทึกการขายสำเร็จ', 'success');
-    setIsSelling(false);
-    queryClient.invalidateQueries({ queryKey: ['stock', id] });
-    queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-    queryClient.invalidateQueries({ queryKey: ['all-trades'] });
-    queryClient.invalidateQueries({ queryKey: ['global-history'] });
-  };
-
-  const handleEditSell = async (data: SellFormData & { profit: number; avg_cost_at_sell: number }) => {
-    if (!editingSell) return;
-    setSelling(true);
-    await updateStockChild(id, 'realized_trades', editingSell.id, {
+    try {
+      await addStockChild<RealizedTrade>(id, 'realized_trades', {
         sell_date: data.sell_date,
         shares: data.shares,
         sell_price: data.sell_price,
         sell_fee: data.sell_fee,
         avg_cost_at_sell: data.avg_cost_at_sell,
         profit: data.profit,
+        port_type: raw.port_type,
       });
-    setSelling(false);
-    toast.show('แก้ไขรายการขายสำเร็จ', 'success');
-    setEditingSell(null);
-    queryClient.invalidateQueries({ queryKey: ['stock', id] });
-    queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-    queryClient.invalidateQueries({ queryKey: ['all-trades'] });
-    queryClient.invalidateQueries({ queryKey: ['global-history'] });
+
+      toast.show('บันทึกการขายสำเร็จ', 'success');
+      setIsSelling(false);
+      queryClient.invalidateQueries({ queryKey: ['stock', id] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['all-trades'] });
+      queryClient.invalidateQueries({ queryKey: ['global-history'] });
+    } catch (error) {
+      toast.show(error instanceof Error ? error.message : 'ดำเนินการไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ', 'error');
+    } finally {
+      setSelling(false);
+    }
+  };
+
+  const handleEditSell = async (data: SellFormData & { profit: number; avg_cost_at_sell: number }) => {
+    if (!editingSell) return;
+    setSelling(true);
+    try {
+      await updateStockChild(id, 'realized_trades', editingSell.id, {
+          sell_date: data.sell_date,
+          shares: data.shares,
+          sell_price: data.sell_price,
+          sell_fee: data.sell_fee,
+          avg_cost_at_sell: data.avg_cost_at_sell,
+          profit: data.profit,
+        });
+
+      toast.show('แก้ไขรายการขายสำเร็จ', 'success');
+      setEditingSell(null);
+      queryClient.invalidateQueries({ queryKey: ['stock', id] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['all-trades'] });
+      queryClient.invalidateQueries({ queryKey: ['global-history'] });
+    } catch (error) {
+      toast.show(error instanceof Error ? error.message : 'ดำเนินการไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ', 'error');
+    } finally {
+      setSelling(false);
+    }
   };
 
   const handleDeleteSell = async (sellId: string) => {
@@ -221,12 +243,18 @@ export default function StockDetailPage({ params }: PageProps) {
   const handleDeleteStock = async () => {
     if (!confirm(`ลบหุ้น ${raw.symbol} ทั้งหมด รวมถึงรอบซื้อทั้งหมด?`)) return;
     setDeleting(true);
-    await deleteStock(id);
-    queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-    queryClient.invalidateQueries({ queryKey: ['all-trades'] });
-    queryClient.invalidateQueries({ queryKey: ['all-dividends'] });
-    queryClient.invalidateQueries({ queryKey: ['global-history'] });
-    router.push('/');
+    try {
+      await deleteStock(id);
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['all-trades'] });
+      queryClient.invalidateQueries({ queryKey: ['all-dividends'] });
+      queryClient.invalidateQueries({ queryKey: ['global-history'] });
+      router.push('/');
+    } catch (error) {
+      toast.show(error instanceof Error ? error.message : 'ดำเนินการไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ', 'error');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handleUpdateStock = async (data: StockFormData) => {
@@ -242,10 +270,10 @@ export default function StockDetailPage({ params }: PageProps) {
         throw new Error('ไม่สามารถเปลี่ยน Port ของหุ้นที่มีประวัติแล้ว กรุณาเพิ่มหุ้น Symbol เดิมใน Port ใหม่');
       }
 
-      if (data.port_type !== raw.port_type) {
-        const duplicate = await findDuplicateStock(raw.symbol, data.port_type, id);
+      if (data.port_type !== raw.port_type || data.country !== raw.country) {
+        const duplicate = await findDuplicateStock(raw.symbol, data.port_type, data.country, id);
         if (duplicate) {
-          throw new Error(`มีหุ้น ${raw.symbol} อยู่ใน Port ${data.port_type} แล้ว`);
+          throw new Error(`มีหุ้น ${raw.symbol} ประเทศ ${data.country} อยู่ใน Port ${data.port_type} แล้ว`);
         }
       }
 
@@ -255,6 +283,8 @@ export default function StockDetailPage({ params }: PageProps) {
           status: resolveAutomaticStockStatus(data.status, stats.active_shares),
           asset_type: data.asset_type,
           port_type: data.port_type,
+          country: data.country.trim().toUpperCase(),
+          platform_trade: data.platform_trade?.trim() || null,
           risk_category: data.risk_category || null,
           dividend_per_share: data.dividend_per_share,
           expected_dividend_per_year: data.expected_dividend_per_year,
@@ -290,6 +320,7 @@ export default function StockDetailPage({ params }: PageProps) {
                 <PortBadge portType={raw.port_type} />
                 <StatusBadge status={stats.status} />
                 <AssetBadge assetType={raw.asset_type} />
+                <CountryBadge country={raw.country} />
                 {raw.risk_category && <RiskBadge riskCategory={raw.risk_category} />}
                 {raw.graph_url && (
                   <a
@@ -420,6 +451,14 @@ export default function StockDetailPage({ params }: PageProps) {
             <div className="stat-label">เงินปันผลคาดการณ์/ปี</div>
             <div className="stat-value violet mono">
               {stats.expected_dividend > 0 ? formatCurrency(stats.expected_dividend) : '—'}
+            </div>
+            <div className="stat-sub">
+              <span className="mono profit" style={{ fontWeight: 700 }}>
+                {stats.total_shares > 0 && stats.total_invested > 0
+                  ? `${formatNumber((stats.expected_dividend / stats.total_invested) * 100)}%`
+                  : '—'}
+              </span>
+              {' ต่อปีของเงินลงทุนที่ถืออยู่'}
             </div>
             <div className="stat-sub">
               ปันผลต่อหุ้น ฿{formatNumber(Number(raw.expected_dividend_per_year) || Number(raw.dividend_per_share ?? 0), 4)} · ตามหุ้นที่ถืออยู่
@@ -587,6 +626,8 @@ export default function StockDetailPage({ params }: PageProps) {
                 existingPortTypes={existingOptions?.ports}
                 existingStatuses={existingOptions?.statuses}
                 existingAssetTypes={existingOptions?.assetTypes}
+                existingCountries={existingOptions?.countries}
+                existingPlatforms={existingOptions?.platforms}
                 lockPortType={(
                   (raw.buy_rounds?.length ?? 0)
                   + (raw.realized_trades?.length ?? 0)

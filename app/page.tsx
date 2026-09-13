@@ -5,8 +5,6 @@ import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import {
   fetchPortfolio,
-  fetchAllTrades,
-  fetchAllDividends,
 } from '@/lib/services/portfolioService';
 import { fetchCashTransactions } from '@/lib/services/cashTransactionService';
 import { calcStats, formatCurrency, formatNumber } from '@/lib/calculations';
@@ -14,6 +12,7 @@ import { RISK_CATEGORY, type PortType } from '@/lib/types';
 import { DashboardCharts } from '@/components/DashboardCharts';
 import { PerformanceAnalytics } from '@/components/PerformanceAnalytics';
 import { ToastContainer } from '@/components/Toast';
+import { normalizeStockCountry } from '@/lib/stock-country';
 
 export default function DashboardPage() {
   const [filterPort, setFilterPort] = useState<PortType | 'All'>('All');
@@ -21,16 +20,6 @@ export default function DashboardPage() {
   const { data: rawStocks = [], isLoading, error } = useQuery({
     queryKey: ['portfolio'],
     queryFn: fetchPortfolio,
-  });
-
-  const { data: allTrades = [] } = useQuery({
-    queryKey: ['all-trades'],
-    queryFn: fetchAllTrades,
-  });
-
-  const { data: allDividends = [] } = useQuery({
-    queryKey: ['all-dividends'],
-    queryFn: fetchAllDividends,
   });
 
   const { data: cashTransactions = [] } = useQuery({
@@ -42,6 +31,14 @@ export default function DashboardPage() {
     rawStocks.map((s) => calcStats(s, s.buy_rounds ?? [], s.realized_trades ?? [], s.dividend_payments ?? [])),
     [rawStocks]
   );
+
+  // Reuse the portfolio request and its recalculated profits for every chart.
+  const allTrades = useMemo(() => stocks.flatMap(stock => (stock.realized_trades ?? []).map(trade => ({
+    ...trade, symbol: stock.symbol, port_type: trade.port_type || stock.port_type,
+  }))), [stocks]);
+  const allDividends = useMemo(() => stocks.flatMap(stock => (stock.dividend_payments ?? []).map(payment => ({
+    ...payment, symbol: stock.symbol, port_type: stock.port_type,
+  }))), [stocks]);
 
   const uniquePorts = useMemo(() => {
     const ports = new Set<string>();
@@ -128,6 +125,17 @@ export default function DashboardPage() {
       map[s.port_type] = (map[s.port_type] || 0) + s.total_invested;
     });
     return Object.entries(map).map(([name, value]) => ({ name, value }));
+  }, [dashboardStocks]);
+
+  const countryData = useMemo(() => {
+    const totals = new Map<string, number>();
+    dashboardStocks.forEach((stock) => {
+      if (stock.total_invested <= 0) return;
+      const country = normalizeStockCountry(stock.country);
+      totals.set(country, (totals.get(country) ?? 0) + stock.total_invested);
+    });
+    return Array.from(totals, ([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
   }, [dashboardStocks]);
 
   const sectorData = useMemo(() => {
@@ -374,6 +382,7 @@ export default function DashboardPage() {
               allDividends={allDividends}
               selectedPort={filterPort}
               onPortChange={setFilterPort}
+              platformStocks={rawStocks}
             />
           );
         })()}
@@ -381,6 +390,7 @@ export default function DashboardPage() {
         {/* Charts Section */}
         <DashboardCharts 
           portData={portData} 
+          countryData={countryData}
           sectorData={sectorData} 
           assetData={assetData} 
           riskData={riskData}

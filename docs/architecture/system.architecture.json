@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "สถาปัตยกรรมระบบ MyPortV3",
+    "output": "system.architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/HubNart121/MyPortV3.git",
+      "revision": "ccbebd9c8f043cc78c4c2c624a9616d9318fc88e"
+    },
+    "views": [
+      { "id": "request-path", "label": "เส้นทางคำขอ", "focus": ["user-browser", "next-web", "apphosting", "firestore"], "note": "ติดตามคำขอของผู้ใช้จาก Browser ผ่านระบบที่ deploy แล้วไปยังข้อมูลถาวร" },
+      { "id": "identity-and-data", "label": "ตัวตนและข้อมูล", "focus": ["user-browser", "firebase-auth", "next-web", "firestore", "storage"], "note": "ดูการใช้ Firebase identity เพื่อจำกัดข้อมูล portfolio และไฟล์ของผู้ใช้" },
+      { "id": "local-fallback", "label": "โหมดสำรองในเครื่อง", "focus": ["next-web", "supabase-local", "local-files-api"], "note": "ตรวจเส้นทางสำรองผ่าน PostgreSQL, PostgREST และ Local Files API" }
+    ]
+  },
+  "components": [
+    { "id": "user-browser", "type": "external", "label": "Browser ผู้ใช้", "tag": "HTTPS", "pos": [40, 350], "size": [180, 80], "sources": [{ "path": "app/layout.tsx", "line": 20, "label": "โครงหน้า App" }] },
+    { "id": "next-web", "type": "frontend", "label": "Web App ของ Next.js", "tag": "PORT_TRACK", "pos": [300, 350], "size": [220, 80], "sources": [{ "path": "app/layout.tsx", "line": 20, "label": "หน้าจอระบบ" }, { "path": "app/portfolio/page.tsx", "line": 1, "label": "หน้า Portfolio" }] },
+    { "id": "firebase-auth", "type": "security", "label": "การยืนยันตัวตน Firebase", "tag": "UID", "pos": [300, 120], "size": [220, 80], "sources": [{ "path": "lib/services/authService.ts", "line": 1, "label": "บริการ Auth" }, { "path": "firestore.rules", "line": 4, "label": "กฎ Auth" }] },
+    { "id": "apphosting", "type": "cloud", "label": "Firebase App Hosting", "tag": "asia-southeast1", "pos": [590, 350], "size": [220, 80], "sources": [{ "path": "firebase.json", "line": 2, "label": "การตั้งค่า Backend" }, { "path": "apphosting.yaml", "line": 1, "label": "การตั้งค่า Runtime" }] },
+    { "id": "api-routes", "type": "backend", "label": "API Routes ของ Next.js", "tag": "Server", "pos": [880, 350], "size": [220, 80], "sources": [{ "path": "app/api/backup/route.ts", "line": 1, "label": "Backup API" }, { "path": "app/api/restore/route.ts", "line": 1, "label": "Restore API" }] },
+    { "id": "firestore", "type": "database", "label": "Cloud Firestore", "tag": "Firebase", "pos": [1170, 230], "size": [220, 80], "sources": [{ "path": "lib/services/portfolioService.ts", "line": 49, "label": "ชุดข้อมูลผู้ใช้" }, { "path": "firestore.rules", "line": 15, "label": "ขอบเขต UID" }] },
+    { "id": "storage", "type": "cloud", "label": "Firebase Cloud Storage", "tag": "Firebase", "pos": [1170, 470], "size": [220, 80], "sources": [{ "path": "lib/services/fileService.ts", "line": 36, "label": "เส้นทางไฟล์ผู้ใช้" }, { "path": "storage.rules", "line": 1, "label": "กฎ Storage" }] },
+    { "id": "supabase-local", "type": "database", "label": "PostgreSQL ในเครื่อง", "tag": "Offline mode", "pos": [590, 630], "size": [240, 80], "sources": [{ "path": "lib/supabase.ts", "line": 1, "label": "Supabase client" }, { "path": "docker-compose.offline.yml", "line": 5, "label": "ฐานข้อมูล Offline" }] },
+    { "id": "local-files-api", "type": "backend", "label": "Local Files API", "tag": "Offline", "pos": [880, 630], "size": [220, 80], "sources": [{ "path": "app/api/local-files/route.ts", "line": 1, "label": "Local file API" }, { "path": "app/api/local-files/[id]/route.ts", "line": 1, "label": "การดึงไฟล์" }] },
+    { "id": "google-oauth", "type": "external", "label": "Google OAuth", "tag": "External", "pos": [40, 120], "size": [180, 80], "sources": [{ "path": "lib/services/authService.ts", "line": 1, "label": "Google Auth" }] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "ขอบเขตผู้ใช้ Firebase ที่ผ่านการยืนยัน", "wraps": ["firebase-auth", "firestore", "storage"] },
+    { "kind": "security-group", "label": "ขอบเขตการทำงาน Offline ในเครื่อง", "wraps": ["supabase-local", "local-files-api"] }
+  ],
+  "connections": [
+    { "id": "browser-to-web", "from": "user-browser", "to": "next-web", "label": "คำขอ HTTPS", "variant": "emphasis" },
+    { "id": "web-to-auth", "from": "next-web", "to": "firebase-auth", "label": "เข้าสู่ระบบ / ผู้ใช้ปัจจุบัน", "variant": "security", "fromSide": "top", "toSide": "right", "labelAt": [620, 220] },
+    { "id": "oauth-to-auth", "from": "google-oauth", "to": "firebase-auth", "label": "ยืนยันผ่าน Google", "variant": "security", "labelAt": [260, 214] },
+    { "id": "web-to-hosting", "from": "next-web", "to": "apphosting", "label": "คำขอไปยังระบบที่ Deploy แล้ว", "labelAt": [700, 460] },
+    { "id": "hosting-to-api", "from": "apphosting", "to": "api-routes", "label": "เส้นทาง Server", "labelAt": [845, 444] },
+    { "id": "api-to-firestore", "from": "api-routes", "to": "firestore", "label": "Backup / Restore ผ่าน Admin", "variant": "emphasis", "labelAt": [1135, 324] },
+    { "id": "web-to-firestore", "from": "next-web", "to": "firestore", "label": "อ่านเขียนข้อมูล + จำกัดด้วย UID", "variant": "emphasis", "fromSide": "right", "toSide": "left", "labelAt": [700, 300] },
+    { "id": "web-to-storage", "from": "next-web", "to": "storage", "label": "อัปโหลดไฟล์ / เก็บลิงก์", "variant": "dashed", "fromSide": "right", "toSide": "left", "via": [[560, 390], [560, 510], [1120, 510]], "labelAt": [840, 550] },
+    { "id": "web-to-local-db", "from": "next-web", "to": "supabase-local", "label": "สำรองข้อมูลเมื่อ Offline", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "labelAt": [560, 560] }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "คำขอหลัก", "items": ["Browser เปิดหน้า App Router ของ Next.js", "Firebase App Hosting ให้บริการระบบที่ Deploy แล้ว", "API Routes จัดการ Backup และ Restore ที่ต้องมีสิทธิ์"] },
+    { "dot": "emerald", "title": "ข้อมูลถาวร", "items": ["Firestore เก็บข้อมูล Portfolio แยกตามผู้ใช้", "Cloud Storage เก็บไฟล์ที่อัปโหลด", "Activity logs และข้อมูล Backup อยู่ภายใต้ขอบเขต Firebase"] },
+    { "dot": "amber", "title": "Fallback และความน่าเชื่อถือ", "items": ["กฎ Firebase จำกัดเฉพาะ Google user ที่ได้รับอนุญาตและยืนยันอีเมลแล้ว", "โหมด Local ใช้ PostgreSQL ผ่าน Supabase client", "ไม่พบ Hermes Agent หรือ AI-agent integration ใน repository"] }
+  ]
+}

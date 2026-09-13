@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import type { RealizedTrade, DividendPayment } from '@/lib/types';
+import type { RealizedTrade, DividendPayment, Stock } from '@/lib/types';
+import { summarizeFilteredPlatformProfit } from '@/lib/platform-profit';
+import { PlatformProfitChart } from '@/components/PlatformProfitChart';
 import { formatCurrency, formatThaiYear } from '@/lib/calculations';
 import { ThaiDateInput } from '@/components/ThaiDateInput';
 import {
@@ -22,6 +24,7 @@ interface PerformanceAnalyticsProps {
   allDividends: (DividendPayment & { symbol: string; port_type?: string })[];
   selectedPort?: string;
   onPortChange?: (port: string) => void;
+  platformStocks?: Pick<Stock, 'id' | 'platform_trade'>[];
 }
 
 type PeriodPreset = 'all' | 'this_year' | '6m' | '3m' | 'custom';
@@ -39,6 +42,7 @@ export function PerformanceAnalytics({
   allDividends,
   selectedPort: externalPort,
   onPortChange,
+  platformStocks,
 }: PerformanceAnalyticsProps) {
   const [preset, setPreset] = useState<PeriodPreset>('all');
   const [customStart, setCustomStart] = useState<string>('');
@@ -114,6 +118,11 @@ export function PerformanceAnalytics({
       return true;
     });
   }, [portFilteredDividends, startDate, endDate]);
+
+  const platformProfitData = useMemo(
+    () => summarizeFilteredPlatformProfit(filteredTrades, platformStocks ?? []),
+    [filteredTrades, platformStocks],
+  );
 
   // Period summary metrics
   const periodRealizedProfit = useMemo(
@@ -623,6 +632,11 @@ export function PerformanceAnalytics({
               </div>
             )}
           </div>
+        </div>
+      )}
+      {platformStocks && (
+        <div style={{ marginTop: '24px' }}>
+          <PlatformProfitChart data={platformProfitData} />
         </div>
       )}
     </div>

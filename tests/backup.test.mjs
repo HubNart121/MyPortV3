@@ -3,10 +3,53 @@ import test from 'node:test';
 import {
   BACKUP_SCHEMA_VERSION,
   completeBackupData,
+  createBackupManifest,
   getBackupCategoryCounts,
+  getBackupContentChecksum,
   getBackupContentSignature,
 } from '../lib/backup.ts';
 import { backupDataSchema } from '../lib/security/backup-schema.ts';
+import { runRestoreWrites, settleRestoreOperations } from '../lib/restore-operations.ts';
+
+test('failed deletes drain pending work before rollback can run', async () => {
+  let finish;
+  let finished = false;
+  const slow = new Promise((resolve) => { finish = () => { finished = true; resolve(); }; });
+  const failure = new Error('delete failed');
+  const work = settleRestoreOperations([Promise.reject(failure), slow]);
+  let rejected = false;
+  const result = work.catch((error) => { rejected = true; assert.equal(error, failure); });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(rejected, false);
+  finish();
+  await result;
+  assert.equal(finished, true);
+  assert.equal(rejected, true);
+});
+
+test('snapshot write failure propagates even when BulkWriter close succeeds', async () => {
+  const failure = new Error('snapshot write denied');
+  let closed = false;
+  await assert.rejects(runRestoreWrites((track) => {
+    track(Promise.resolve());
+    track(Promise.reject(failure));
+  }, async () => { closed = true; }), (error) => error === failure);
+  assert.equal(closed, true);
+});
+
+test('synchronous enqueue failure still drains queued writes and closes writer', async () => {
+  const failure = new Error('invalid document');
+  let drained = false;
+  await assert.rejects(runRestoreWrites((track) => {
+    track(new Promise((resolve) => setImmediate(() => { drained = true; resolve(); })));
+    throw failure;
+  }, async () => {}), (error) => error === failure);
+  assert.equal(drained, true);
+});
+
+test('successful snapshot writes finish normally', async () => {
+  await runRestoreWrites((track) => track(Promise.resolve()), async () => {});
+});
 
 function legacyBackup() {
   return {
@@ -47,8 +90,9 @@ function legacyBackup() {
 test('upgrades a legacy backup with current defaults and manifest', () => {
   const upgraded = completeBackupData(legacyBackup());
 
-  assert.equal(BACKUP_SCHEMA_VERSION, 5);
-  assert.equal(upgraded.schema_version, 5);
+  assert.equal(BACKUP_SCHEMA_VERSION, 7);
+  assert.equal(upgraded.schema_version, 7);
+  assert.equal(upgraded.stocks[0].country, 'THAI');
   assert.equal(upgraded.stocks[0].expected_dividend_per_year, 0);
   assert.equal(upgraded.stocks[0].risk_category, null);
   assert.equal(upgraded.stocks[0].buy_rounds[0].buy_fee, 0);
@@ -59,17 +103,20 @@ test('upgrades a legacy backup with current defaults and manifest', () => {
   assert.deepEqual(upgraded.cash_transactions, []);
   assert.deepEqual(upgraded.manifest?.excluded_categories, ['activity_logs']);
   assert.deepEqual(upgraded.manifest?.categories, getBackupCategoryCounts(upgraded));
+  assert.equal(upgraded.manifest?.content_checksum, getBackupContentChecksum(upgraded));
 });
 
 test('preserves the annual expected dividend in a current backup', () => {
   const current = legacyBackup();
   current.stocks[0].expected_dividend_per_year = 11;
   current.stocks[0].risk_category = '🟢 Income / Dividend';
+  current.stocks[0].country = ' usa ';
 
   const completed = completeBackupData(current);
 
   assert.equal(completed.stocks[0].expected_dividend_per_year, 11);
   assert.equal(completed.stocks[0].risk_category, '🟢 Income / Dividend');
+  assert.equal(completed.stocks[0].country, 'USA');
 });
 
 function completeCurrentBackup() {
@@ -134,7 +181,7 @@ function completeCurrentBackup() {
   return completeBackupData(backup);
 }
 
-test('validates a complete current backup across all seven categories', () => {
+test('validates a complete current backup across all eight categories', () => {
   const backup = completeCurrentBackup();
   const parsed = backupDataSchema.safeParse(backup);
 
@@ -147,9 +194,11 @@ test('validates a complete current backup across all seven categories', () => {
     cash_transactions: 1,
     files: 1,
     informations: 1,
+    bank_accounts: 0,
   });
   assert.equal(parsed.data.stocks[0].risk_category, '🟡 Quality / Core');
   assert.equal(parsed.data.stocks[0].expected_dividend_per_year, 3.25);
+  assert.equal(parsed.data.stocks[0].country, 'THAI');
 });
 
 test('rejects invalid risk categories and inconsistent manifests', () => {
@@ -160,6 +209,21 @@ test('rejects invalid risk categories and inconsistent manifests', () => {
   const invalidCount = structuredClone(completeCurrentBackup());
   invalidCount.manifest.categories.stocks = 2;
   assert.equal(backupDataSchema.safeParse(invalidCount).success, false);
+});
+
+test('rejects changed v7 content and keeps legacy v6 checksum optional', () => {
+  const changed = structuredClone(completeCurrentBackup());
+  changed.stocks[0].current_price += 1;
+  assert.equal(backupDataSchema.safeParse(changed).success, false);
+
+  const missingManifest = structuredClone(completeCurrentBackup());
+  delete missingManifest.manifest;
+  assert.equal(backupDataSchema.safeParse(missingManifest).success, false);
+
+  const legacyV6 = structuredClone(completeCurrentBackup());
+  legacyV6.schema_version = 6;
+  delete legacyV6.manifest.content_checksum;
+  assert.equal(backupDataSchema.safeParse(legacyV6).success, true);
 });
 
 test('rejects duplicate child IDs and invalid stock references', () => {
@@ -183,4 +247,55 @@ test('content verification ignores ordering but detects changed values', () => {
   const changed = structuredClone(expected);
   changed.stocks[0].expected_dividend_per_year = 9.99;
   assert.notEqual(getBackupContentSignature(expected), getBackupContentSignature(changed));
+});
+
+test('accepts legacy v5 manifests without bank accounts and defaults country', () => {
+  const old = completeCurrentBackup();
+  old.schema_version = 5;
+  delete old.bank_accounts;
+  delete old.manifest.categories.bank_accounts;
+  delete old.stocks[0].country;
+  const parsed = backupDataSchema.parse(old);
+  assert.equal(parsed.stocks[0].country, 'THAI');
+  assert.deepEqual(parsed.bank_accounts, []);
+  assert.equal(parsed.manifest.categories.bank_accounts, 0);
+});
+
+test('round trips all eight categories including country and bank balances', () => {
+  const backup = completeCurrentBackup();
+  backup.stocks[0].country = 'JAPAN';
+  backup.bank_accounts = [{ id: 'bank-1', account_number: '001-test', account_type: 'Business', balance: 1234.56, note: null, created_at: backup.exported_at, updated_at: backup.exported_at }];
+  const expected = completeBackupData(backup);
+  const restored = completeBackupData(backupDataSchema.parse(JSON.parse(JSON.stringify(expected))));
+  assert.equal(getBackupContentSignature(restored), getBackupContentSignature(expected));
+  restored.bank_accounts[0].balance += 1;
+  assert.notEqual(getBackupContentSignature(restored), getBackupContentSignature(expected));
+  const invalid = structuredClone(expected);
+  delete invalid.manifest.categories.bank_accounts;
+  assert.equal(backupDataSchema.safeParse(invalid).success, false);
+});
+
+test('rejects duplicate stock identities but allows different countries or ports', () => {
+  const backup = completeCurrentBackup();
+  backup.stocks.push({ ...backup.stocks[0], id: 'stock-2', symbol: ' ptt ', buy_rounds: [], realized_trades: [], dividend_payments: [] });
+  backup.manifest = createBackupManifest(backup);
+  assert.equal(backupDataSchema.safeParse(backup).success, false);
+  backup.stocks[1].country = 'USA';
+  backup.manifest = createBackupManifest(backup);
+  assert.equal(backupDataSchema.safeParse(backup).success, true);
+  backup.stocks[1].country = 'THAI';
+  backup.stocks[1].port_type = 'Business';
+  backup.manifest = createBackupManifest(backup);
+  assert.equal(backupDataSchema.safeParse(backup).success, true);
+});
+
+test('platform trade survives backup validation for defaults and custom platforms', () => {
+  for (const platform of ['streaming', 'innovestx', 'Dime', 'Custom Broker']) {
+    const source = legacyBackup();
+    source.stocks[0].platform_trade = platform;
+    const parsed = backupDataSchema.parse(completeBackupData(source));
+    assert.equal(parsed.stocks[0].platform_trade, platform);
+    assert.equal(completeBackupData(parsed).stocks[0].platform_trade, platform);
+  }
+  assert.equal(backupDataSchema.parse(completeBackupData(legacyBackup())).stocks[0].platform_trade, null);
 });

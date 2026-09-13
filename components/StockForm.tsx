@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { STOCK_STATUS, ASSET_TYPE, RISK_CATEGORY } from '@/lib/types';
+import { STOCK_STATUS, ASSET_TYPE, RISK_CATEGORY, STOCK_COUNTRY, PLATFORM_TRADE } from '@/lib/types';
 import type { Stock } from '@/lib/types';
 
 const toNum = (v: unknown) => (v === '' || v === undefined || v === null ? 0 : Number(v));
@@ -16,6 +16,8 @@ const schema = z.object({
   status: z.string().min(1, 'Required'),
   asset_type: z.string().min(1, 'Required'),
   port_type: z.string().min(1, 'Required'),
+  country: z.string().trim().min(1, 'กรุณาระบุประเทศ').transform((value) => value.toUpperCase()),
+  platform_trade: z.string().trim().max(500).optional().nullable(),
   risk_category: z.enum(RISK_CATEGORY).or(z.literal('')).nullable().optional(),
   dividend_per_share: z.coerce.number().min(0),
   expected_dividend_per_year: z.coerce.number().min(0),
@@ -38,6 +40,8 @@ interface StockFormProps {
   existingPortTypes?: string[];
   existingStatuses?: string[];
   existingAssetTypes?: string[];
+  existingCountries?: string[];
+  existingPlatforms?: string[];
   lockPortType?: boolean;
 }
 
@@ -50,6 +54,8 @@ export function StockForm({
   existingPortTypes,
   existingStatuses,
   existingAssetTypes,
+  existingCountries,
+  existingPlatforms,
   lockPortType = false,
 }: StockFormProps) {
   // Port Types
@@ -100,6 +106,20 @@ export function StockForm({
   );
   const [customAssetValue, setCustomAssetValue] = useState(isCustomAsset ? initialAsset : '');
 
+  const allPlatforms = Array.from(new Set([...PLATFORM_TRADE, ...(existingPlatforms || []), initialData?.platform_trade || ''].filter(Boolean)));
+  const [isCustomPlatform, setIsCustomPlatform] = useState(false);
+
+  const allCountries = Array.from(new Set([
+    ...STOCK_COUNTRY,
+    ...(existingCountries || []).map((value) => value.trim().toUpperCase()),
+    ...(initialData?.country ? [initialData.country.trim().toUpperCase()] : []),
+  ].filter(Boolean)));
+  const initialCountry = (initialData?.country || 'THAI').trim().toUpperCase();
+  const [isCustomCountry, setIsCustomCountry] = useState(
+    !allCountries.includes(initialCountry) && initialCountry !== '',
+  );
+  const [customCountryValue, setCustomCountryValue] = useState(isCustomCountry ? initialCountry : '');
+
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<StockFormInput>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -109,6 +129,8 @@ export function StockForm({
       status: initialStatus,
       asset_type: initialAsset,
       port_type: initialPort,
+      country: initialCountry,
+      platform_trade: initialData?.platform_trade || '',
       risk_category: initialData?.risk_category || '',
       dividend_per_share: initialData?.dividend_per_share || 0,
       expected_dividend_per_year: initialData?.expected_dividend_per_year || 0,
@@ -123,6 +145,7 @@ export function StockForm({
   const currentPortType = watch('port_type');
   const currentStatus = watch('status');
   const currentAssetType = watch('asset_type');
+  const currentCountry = watch('country');
 
   const onFormSubmit = (data: StockFormInput) => {
     onSubmit(data as StockFormData);
@@ -149,10 +172,88 @@ export function StockForm({
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
           <div className="form-group">
             <label className="form-label">กลุ่มอุตสาหกรรม</label>
             <input className="form-input" placeholder="พลังงาน" {...register('sector')} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">หุ้นประเทศ *</label>
+            {!isCustomCountry ? (
+              <select
+                className="form-select"
+                value={currentCountry || ''}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === '__NEW__') {
+                    setIsCustomCountry(true);
+                    setValue('country', customCountryValue || '');
+                  } else {
+                    setValue('country', value);
+                  }
+                }}
+              >
+                {allCountries.map((country) => (
+                  <option key={country} value={country}>{country}</option>
+                ))}
+                <option value="__NEW__">+ เพิ่มประเทศใหม่...</option>
+              </select>
+            ) : (
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  className="form-input mono"
+                  placeholder="เช่น JAPAN"
+                  value={customCountryValue}
+                  onChange={(event) => {
+                    const value = event.target.value.toUpperCase();
+                    setCustomCountryValue(value);
+                    setValue('country', value, { shouldValidate: true });
+                  }}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ whiteSpace: 'nowrap', padding: '0 12px' }}
+                  onClick={() => {
+                    setIsCustomCountry(false);
+                    setValue('country', allCountries[0] || 'THAI');
+                  }}
+                >
+                  ← เลือกที่มี
+                </button>
+              </div>
+            )}
+            {errors.country && <span className="form-error">{errors.country.message}</span>}
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="platform-trade">PlatformTrade</label>
+            {!isCustomPlatform ? (
+              <select id="platform-trade" className="form-select" value={watch('platform_trade') || ''}
+                onChange={(event) => {
+                  if (event.target.value === '__NEW__') {
+                    setIsCustomPlatform(true);
+                    setValue('platform_trade', '');
+                  } else {
+                    setValue('platform_trade', event.target.value, { shouldValidate: true });
+                  }
+                }}>
+                <option value="">ไม่ระบุ</option>
+                {allPlatforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}
+                <option value="__NEW__">+ เพิ่มแพลตฟอร์มใหม่...</option>
+              </select>
+            ) : (
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input id="platform-trade" className="form-input" placeholder="ชื่อแพลตฟอร์มใหม่"
+                  maxLength={500} autoFocus {...register('platform_trade')} />
+                <button type="button" className="btn btn-secondary btn-sm" style={{ whiteSpace: 'nowrap' }}
+                  onClick={() => { setIsCustomPlatform(false); setValue('platform_trade', '', { shouldValidate: true }); }}>
+                  ← เลือกที่มี
+                </button>
+              </div>
+            )}
+            {errors.platform_trade && <span className="form-error">{errors.platform_trade.message}</span>}
           </div>
           <div className="form-group">
             <label className="form-label">Type Port *</label>
@@ -221,7 +322,7 @@ export function StockForm({
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
           {/* Status */}
           <div className="form-group">
             <label className="form-label">Status *</label>
@@ -356,7 +457,7 @@ export function StockForm({
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
           <div className="form-group">
             <label className="form-label">Graph</label>
             <input

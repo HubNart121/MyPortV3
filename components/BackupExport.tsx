@@ -3,23 +3,14 @@
 import { useState } from 'react';
 import { isOfflineMode } from '@/lib/app-mode';
 import type { BackupCategoryCounts, BackupData } from '@/lib/types';
-import { completeBackupData, getBackupCategoryCounts } from '@/lib/backup';
+import { BACKUP_CATEGORY_LABELS, completeBackupData, getBackupCategoryCounts } from '@/lib/backup';
 import { backupDataSchema } from '@/lib/security/backup-schema';
 import { auth, isFirebaseConfigured } from '@/lib/firebase';
 import { fetchFiles } from '@/lib/services/fileService';
 import { fetchInformations } from '@/lib/services/infoService';
 import { fetchCashTransactions } from '@/lib/services/cashTransactionService';
 import { fetchPortfolio } from '@/lib/services/portfolioService';
-
-export const BACKUP_CATEGORY_LABELS = [
-  ['stocks', 'หุ้น'],
-  ['buy_rounds', 'รอบซื้อ'],
-  ['realized_trades', 'รายการขาย'],
-  ['dividend_payments', 'เงินปันผล'],
-  ['cash_transactions', 'ฝาก / ถอน'],
-  ['files', 'รายการไฟล์'],
-  ['informations', 'คลังความรู้'],
-] as const;
+import { fetchBankAccounts } from '@/lib/services/bankAccountService';
 
 export async function apiError(response: Response, fallback: string): Promise<Error> {
   try {
@@ -78,19 +69,21 @@ export function BackupExport() {
         if (!parsed.success) throw new Error('ข้อมูล Backup จาก Server ไม่ครบตามรูปแบบที่กำหนด');
         backup = completeBackupData(parsed.data);
       } else {
-        const [stocks, files, informations, cashTransactions] = await Promise.all([
+        const [stocks, files, informations, cashTransactions, bankAccounts] = await Promise.all([
           fetchPortfolio(),
           fetchFiles(),
           fetchInformations(),
           fetchCashTransactions(),
+          fetchBankAccounts(),
         ]);
         backup = completeBackupData({
-          version: '5.0 (Complete Local account backup)',
+          version: '7.0 (Integrity-checked Local account backup)',
           exported_at: new Date().toISOString(),
           stocks,
           files,
           informations,
           cash_transactions: cashTransactions,
+          bank_accounts: bankAccounts,
         });
       }
       setExportCounts(getBackupCategoryCounts(backup));
@@ -110,8 +103,8 @@ export function BackupExport() {
           ดาวน์โหลดข้อมูลครบทุกหมวดของบัญชีที่กำลังใช้งานเป็น JSON ไฟล์เดียว
         </p>
         <div style={{ marginBottom: '16px', fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.7 }}>
-          หุ้น · รอบซื้อ · รายการขาย · เงินปันผล · ฝาก/ถอน · รายการไฟล์ · คลังความรู้
-          <br />ข้อมูลหุ้นรวม Risk Category และเงินปันผลคาดการณ์/ปี · Activity Log จะไม่ถูก Export หรือแทนที่ตอน Restore
+          หุ้น · รอบซื้อ · รายการขาย · เงินปันผล · ฝาก/ถอน · รายการไฟล์ · คลังความรู้ · บัญชีธนาคาร
+          <br />ข้อมูลหุ้นรวมประเทศ Risk Category และเงินปันผลคาดการณ์/ปี · Activity Log จะไม่ถูก Export หรือแทนที่ตอน Restore
           <br />ไฟล์อัปโหลดสำรองเฉพาะชื่อ รายละเอียด และลิงก์ ไม่ฝังไฟล์ไบนารีลง JSON
         </div>
         <button className="btn btn-primary" onClick={handleExport} disabled={exporting}>
@@ -119,7 +112,7 @@ export function BackupExport() {
         </button>
         {exportCounts && (
           <div style={{ marginTop: '14px', fontSize: '11px', color: 'var(--green)' }}>
-            ✓ ตรวจสอบไฟล์แล้ว: {BACKUP_CATEGORY_LABELS.map(([key, label]) => `${label} ${exportCounts[key]}`).join(' · ')}
+            ✓ ตรวจโครงสร้าง จำนวนข้อมูล และลายนิ้วมือไฟล์แล้ว: {BACKUP_CATEGORY_LABELS.map(([key, label]) => `${label} ${exportCounts[key]}`).join(' · ')}
           </div>
         )}
         {error && <div className="operation-message operation-error">⚠ {error}</div>}

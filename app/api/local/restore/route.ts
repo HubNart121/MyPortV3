@@ -54,6 +54,7 @@ export async function POST(request: Request) {
         cash_transactions: counts.data.cash_transactions,
         files: counts.data.files,
         informations: counts.data.informations,
+        bank_accounts: counts.data.bank_accounts,
         source: 'local_restore',
       },
     });

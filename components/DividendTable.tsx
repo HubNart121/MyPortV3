@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useToast } from './Toast';
 import type { DividendPayment } from '@/lib/types';
 import { ThaiDateInput } from './ThaiDateInput';
 import { formatCurrency, formatNumber, formatThaiDate } from '@/lib/calculations';
@@ -27,6 +28,7 @@ export function DividendTable({
   onEdit,
   onDelete,
 }: DividendTableProps) {
+  const toast = useToast();
   const [showForm, setShowForm] = useState(false);
   const [editingItem, setEditingItem] = useState<DividendPayment | null>(null);
   const [saving, setSaving] = useState(false);
@@ -64,6 +66,8 @@ export function DividendTable({
       });
       resetAddForm();
       setShowForm(false);
+    } catch (error) {
+      toast.show(error instanceof Error ? error.message : 'ดำเนินการไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ', 'error');
     } finally {
       setSaving(false);
     }
@@ -89,6 +93,8 @@ export function DividendTable({
         tax_pct: editTaxPct,
       });
       setEditingItem(null);
+    } catch (error) {
+      toast.show(error instanceof Error ? error.message : 'ดำเนินการไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ', 'error');
     } finally {
       setSaving(false);
     }
@@ -99,6 +105,8 @@ export function DividendTable({
     setDeleting(id);
     try {
       await onDelete(id);
+    } catch (error) {
+      toast.show(error instanceof Error ? error.message : 'ดำเนินการไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ', 'error');
     } finally {
       setDeleting(null);
     }

@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS stocks (
   status TEXT NOT NULL,
   asset_type TEXT NOT NULL,
   port_type TEXT NOT NULL DEFAULT 'Private',
+  country TEXT NOT NULL DEFAULT 'THAI',
+  platform_trade TEXT,
   risk_category TEXT,
   dividend_per_share NUMERIC DEFAULT 0,
   expected_dividend_per_year NUMERIC DEFAULT 0,
@@ -21,7 +23,9 @@ CREATE TABLE IF NOT EXISTS stocks (
 ALTER TABLE stocks ADD COLUMN IF NOT EXISTS graph_url TEXT;
 ALTER TABLE stocks ADD COLUMN IF NOT EXISTS link_url TEXT;
 ALTER TABLE stocks ADD COLUMN IF NOT EXISTS expected_dividend_per_year NUMERIC DEFAULT 0;
+ALTER TABLE stocks ADD COLUMN IF NOT EXISTS platform_trade TEXT;
 ALTER TABLE stocks ADD COLUMN IF NOT EXISTS risk_category TEXT;
+ALTER TABLE stocks ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 'THAI';
 
 -- 2. Create buy_rounds table
 CREATE TABLE IF NOT EXISTS buy_rounds (

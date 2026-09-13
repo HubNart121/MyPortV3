@@ -14,6 +14,9 @@ services:
       - ./docker/db/05-multi-port-symbol.sql:/docker-entrypoint-initdb.d/05-multi-port-symbol.sql:ro
       - ./docker/db/06-trading-fees.sql:/docker-entrypoint-initdb.d/06-trading-fees.sql:ro
       - ./docker/db/07-backup-schema-parity.sql:/docker-entrypoint-initdb.d/07-backup-schema-parity.sql:ro
+      - ./docker/db/11-bank-accounts.sql:/docker-entrypoint-initdb.d/11-bank-accounts.sql:ro
+      - ./docker/db/12-stock-country.sql:/docker-entrypoint-initdb.d/12-stock-country.sql:ro
+      - ./docker/db/13-platform-trade.sql:/docker-entrypoint-initdb.d/13-platform-trade.sql:ro
     ports:
       - "5434:5432"
     restart: unless-stopped

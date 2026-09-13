@@ -1,3 +1,4 @@
+import { waitForBestEffort } from '../best-effort';
 import {
   collection,
   deleteDoc,
@@ -16,12 +17,17 @@ import type {
   RealizedTrade,
   Stock,
 } from '../types';
+import { normalizeStockCountry, stockIdentityKey } from '../stock-country';
 
 type StockBundle = Stock & {
   buy_rounds: BuyRound[];
   realized_trades: RealizedTrade[];
   dividend_payments: DividendPayment[];
 };
+
+function normalizeStock<T extends StockBundle>(stock: T): T {
+  return { ...stock, country: normalizeStockCountry(stock.country) };
+}
 
 type ChildCollection = 'buy_rounds' | 'realized_trades' | 'dividend_payments';
 
@@ -65,22 +71,24 @@ function withId<T>(id: string, value: Record<string, unknown>): T {
   return { ...value, id } as T;
 }
 
-async function firebaseStock(id: string): Promise<StockBundle | null> {
-  const stockSnap = await getDoc(userDocument('stocks', id));
-  if (!stockSnap.exists()) return null;
-
+async function loadStockChildren(id: string, data: Record<string, unknown>): Promise<StockBundle> {
   const [buySnap, sellSnap, dividendSnap] = await Promise.all([
     getDocs(childCollection(id, 'buy_rounds')),
     getDocs(childCollection(id, 'realized_trades')),
     getDocs(childCollection(id, 'dividend_payments')),
   ]);
 
-  return {
-    ...withId<Stock>(stockSnap.id, stockSnap.data()),
+  return normalizeStock({
+    ...withId<Stock>(id, data),
     buy_rounds: buySnap.docs.map((item) => withId<BuyRound>(item.id, item.data())),
     realized_trades: sellSnap.docs.map((item) => withId<RealizedTrade>(item.id, item.data())),
     dividend_payments: dividendSnap.docs.map((item) => withId<DividendPayment>(item.id, item.data())),
-  };
+  } as StockBundle);
+}
+
+async function firebaseStock(id: string): Promise<StockBundle | null> {
+  const stockSnap = await getDoc(userDocument('stocks', id));
+  return stockSnap.exists() ? loadStockChildren(stockSnap.id, stockSnap.data()) : null;
 }
 
 export async function fetchPortfolio(): Promise<StockBundle[]> {
@@ -91,11 +99,11 @@ export async function fetchPortfolio(): Promise<StockBundle[]> {
       .select('*, buy_rounds(*), realized_trades(*), dividend_payments(*)')
       .order('created_at', { ascending: false });
     if (error) throw error;
-    return (data ?? []) as StockBundle[];
+    return ((data ?? []) as StockBundle[]).map(normalizeStock);
   }
 
   const snapshot = await getDocs(userCollection('stocks'));
-  const stocks = await Promise.all(snapshot.docs.map((item) => firebaseStock(item.id)));
+  const stocks = await Promise.all(snapshot.docs.map((item) => loadStockChildren(item.id, item.data())));
   return stocks
     .filter((item): item is StockBundle => Boolean(item))
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -110,7 +118,7 @@ export async function fetchStock(id: string): Promise<StockBundle> {
       .eq('id', id)
       .single();
     if (error) throw error;
-    return data as StockBundle;
+    return normalizeStock(data as StockBundle);
   }
 
   const stock = await firebaseStock(id);
@@ -118,22 +126,34 @@ export async function fetchStock(id: string): Promise<StockBundle> {
   return stock;
 }
 
+async function fetchStockMetadata(): Promise<Stock[]> {
+  if (isFirebaseConfigured) {
+    const snapshot = await getDocs(userCollection('stocks'));
+    return snapshot.docs.map(item => withId<Stock>(item.id, item.data()));
+  }
+  const { data, error } = await getSupabase().from('stocks').select('*');
+  if (error) throw error;
+  return (data ?? []) as Stock[];
+}
+
 export async function fetchStockOptions() {
-  const stocks = await fetchPortfolio();
+  const stocks = await fetchStockMetadata();
   return {
     ports: Array.from(new Set(stocks.map((stock) => stock.port_type).filter(Boolean))),
     statuses: Array.from(new Set(stocks.map((stock) => stock.status).filter(Boolean))),
     assetTypes: Array.from(new Set(stocks.map((stock) => stock.asset_type).filter(Boolean))),
+    platforms: Array.from(new Set(stocks.map((stock) => stock.platform_trade?.trim() || '').filter(Boolean))),
+    countries: Array.from(new Set(stocks.map((stock) => stock.country || 'THAI').filter(Boolean))),
   };
 }
 
-export async function findDuplicateStock(symbol: string, portType: string, excludeId?: string) {
-  const stocks = await fetchPortfolio();
+export async function findDuplicateStock(symbol: string, portType: string, country: string, excludeId?: string) {
+  const stocks = await fetchStockMetadata();
+  const identity = stockIdentityKey(symbol, portType, country);
   return stocks.find(
     (stock) =>
       stock.id !== excludeId &&
-      stock.symbol.toUpperCase() === symbol.trim().toUpperCase() &&
-      stock.port_type === portType,
+      stockIdentityKey(stock.symbol, stock.port_type, stock.country) === identity,
   );
 }
 
@@ -141,11 +161,15 @@ export async function createStock(
   data: Omit<Stock, 'id' | 'created_at' | 'updated_at' | 'buy_rounds' | 'realized_trades' | 'dividend_payments'>,
 ): Promise<Stock> {
   const now = new Date().toISOString();
+  const normalizedData = {
+    ...data,
+    country: normalizeStockCountry(data.country),
+  };
   if (!isFirebaseConfigured) {
     const supabase = getSupabase();
     const { data: inserted, error } = await supabase
       .from('stocks')
-      .insert(data)
+      .insert(normalizedData)
       .select()
       .single();
     if (error) throw error;
@@ -160,7 +184,7 @@ export async function createStock(
   }
 
   const stockRef = doc(userCollection('stocks'));
-  const stock = { ...data, id: stockRef.id, created_at: now, updated_at: now } as Stock;
+  const stock = { ...normalizedData, id: stockRef.id, created_at: now, updated_at: now } as Stock;
   const { id, ...payload } = stock;
   await setDoc(stockRef, payload);
   await recordActivityLog({
@@ -175,9 +199,12 @@ export async function createStock(
 
 export async function updateStock(id: string, data: Partial<Stock>): Promise<void> {
   const before = await fetchStock(id).catch(() => null);
+  const normalizedData = data.country === undefined
+    ? data
+    : { ...data, country: normalizeStockCountry(data.country) };
   if (!isFirebaseConfigured) {
     const supabase = getSupabase();
-    const { error } = await supabase.from('stocks').update(data).eq('id', id);
+    const { error } = await supabase.from('stocks').update(normalizedData).eq('id', id);
     if (error) throw error;
     await recordActivityLog({
       action: 'update',
@@ -189,7 +216,7 @@ export async function updateStock(id: string, data: Partial<Stock>): Promise<voi
     return;
   }
 
-  const { id: _id, buy_rounds, realized_trades, dividend_payments, ...payload } = data;
+  const { id: _id, buy_rounds, realized_trades, dividend_payments, ...payload } = normalizedData;
   await setDoc(
     userDocument('stocks', id),
     { ...payload, updated_at: new Date().toISOString() },
@@ -272,6 +299,17 @@ export async function clearPortfolio(): Promise<number> {
   return deletedCount;
 }
 
+// Activity labels only need the stock header, not every buy/sell/dividend record.
+async function fetchActivityStock(stockId: string): Promise<{ symbol?: string } | null> {
+  if (isFirebaseConfigured) {
+    const snapshot = await getDoc(userDocument('stocks', stockId));
+    return snapshot.exists() ? { symbol: snapshot.data().symbol } : null;
+  }
+  const { data, error } = await getSupabase().from('stocks').select('symbol').eq('id', stockId).single();
+  if (error) throw error;
+  return data;
+}
+
 export async function addStockChild<T extends { id?: string; stock_id?: string }>(
   stockId: string,
   name: ChildCollection,
@@ -285,14 +323,16 @@ export async function addStockChild<T extends { id?: string; stock_id?: string }
       .select('id')
       .single();
     if (error) throw error;
-    const stock = await fetchStock(stockId).catch(() => null);
-    await recordActivityLog({
-      action: 'create',
-      category: CHILD_ACTIVITY_CATEGORY[name],
-      target_label: stock?.symbol ?? stockId,
-      summary: `เพิ่ม${CHILD_ACTIVITY_LABEL[name]}ของ ${stock?.symbol ?? stockId}`,
-      metadata: { stock_id: stockId, target_id: inserted.id, source: name },
-    });
+    await waitForBestEffort(async () => {
+      const stock = await fetchActivityStock(stockId).catch(() => null);
+      await recordActivityLog({
+        action: 'create',
+        category: CHILD_ACTIVITY_CATEGORY[name],
+        target_label: stock?.symbol ?? stockId,
+        summary: `เพิ่ม${CHILD_ACTIVITY_LABEL[name]}ของ ${stock?.symbol ?? stockId}`,
+        metadata: { stock_id: stockId, target_id: inserted.id, source: name },
+      });
+    }, 'Stock activity log');
     return inserted.id as string;
   }
 
@@ -302,14 +342,16 @@ export async function addStockChild<T extends { id?: string; stock_id?: string }
     stock_id: stockId,
     created_at: new Date().toISOString(),
   });
-  const stock = await fetchStock(stockId).catch(() => null);
-  await recordActivityLog({
-    action: 'create',
-    category: CHILD_ACTIVITY_CATEGORY[name],
-    target_label: stock?.symbol ?? stockId,
-    summary: `เพิ่ม${CHILD_ACTIVITY_LABEL[name]}ของ ${stock?.symbol ?? stockId}`,
-    metadata: { stock_id: stockId, target_id: itemRef.id, source: name },
-  });
+  await waitForBestEffort(async () => {
+    const stock = await fetchActivityStock(stockId).catch(() => null);
+    await recordActivityLog({
+      action: 'create',
+      category: CHILD_ACTIVITY_CATEGORY[name],
+      target_label: stock?.symbol ?? stockId,
+      summary: `เพิ่ม${CHILD_ACTIVITY_LABEL[name]}ของ ${stock?.symbol ?? stockId}`,
+      metadata: { stock_id: stockId, target_id: itemRef.id, source: name },
+    });
+  }, 'Stock activity log');
   return itemRef.id;
 }
 
@@ -323,7 +365,21 @@ export async function updateStockChild(
     const supabase = getSupabase();
     const { error } = await supabase.from(name).update(data).eq('id', id);
     if (error) throw error;
-    const stock = await fetchStock(stockId).catch(() => null);
+    await waitForBestEffort(async () => {
+      const stock = await fetchActivityStock(stockId).catch(() => null);
+      await recordActivityLog({
+        action: 'update',
+        category: CHILD_ACTIVITY_CATEGORY[name],
+        target_label: stock?.symbol ?? stockId,
+        summary: `แก้ไข${CHILD_ACTIVITY_LABEL[name]}ของ ${stock?.symbol ?? stockId}`,
+        metadata: { stock_id: stockId, target_id: id, source: name },
+      });
+    }, 'Stock activity log');
+    return;
+  }
+  await setDoc(doc(childCollection(stockId, name), id), data, { merge: true });
+  await waitForBestEffort(async () => {
+    const stock = await fetchActivityStock(stockId).catch(() => null);
     await recordActivityLog({
       action: 'update',
       category: CHILD_ACTIVITY_CATEGORY[name],
@@ -331,17 +387,7 @@ export async function updateStockChild(
       summary: `แก้ไข${CHILD_ACTIVITY_LABEL[name]}ของ ${stock?.symbol ?? stockId}`,
       metadata: { stock_id: stockId, target_id: id, source: name },
     });
-    return;
-  }
-  await setDoc(doc(childCollection(stockId, name), id), data, { merge: true });
-  const stock = await fetchStock(stockId).catch(() => null);
-  await recordActivityLog({
-    action: 'update',
-    category: CHILD_ACTIVITY_CATEGORY[name],
-    target_label: stock?.symbol ?? stockId,
-    summary: `แก้ไข${CHILD_ACTIVITY_LABEL[name]}ของ ${stock?.symbol ?? stockId}`,
-    metadata: { stock_id: stockId, target_id: id, source: name },
-  });
+  }, 'Stock activity log');
 }
 
 export async function deleteStockChild(
@@ -353,7 +399,21 @@ export async function deleteStockChild(
     const supabase = getSupabase();
     const { error } = await supabase.from(name).delete().eq('id', id);
     if (error) throw error;
-    const stock = await fetchStock(stockId).catch(() => null);
+    await waitForBestEffort(async () => {
+      const stock = await fetchActivityStock(stockId).catch(() => null);
+      await recordActivityLog({
+        action: 'delete',
+        category: CHILD_ACTIVITY_CATEGORY[name],
+        target_label: stock?.symbol ?? stockId,
+        summary: `ลบ${CHILD_ACTIVITY_LABEL[name]}ของ ${stock?.symbol ?? stockId}`,
+        metadata: { stock_id: stockId, target_id: id, source: name },
+      });
+    }, 'Stock activity log');
+    return;
+  }
+  await deleteDoc(doc(childCollection(stockId, name), id));
+  await waitForBestEffort(async () => {
+    const stock = await fetchActivityStock(stockId).catch(() => null);
     await recordActivityLog({
       action: 'delete',
       category: CHILD_ACTIVITY_CATEGORY[name],
@@ -361,17 +421,7 @@ export async function deleteStockChild(
       summary: `ลบ${CHILD_ACTIVITY_LABEL[name]}ของ ${stock?.symbol ?? stockId}`,
       metadata: { stock_id: stockId, target_id: id, source: name },
     });
-    return;
-  }
-  await deleteDoc(doc(childCollection(stockId, name), id));
-  const stock = await fetchStock(stockId).catch(() => null);
-  await recordActivityLog({
-    action: 'delete',
-    category: CHILD_ACTIVITY_CATEGORY[name],
-    target_label: stock?.symbol ?? stockId,
-    summary: `ลบ${CHILD_ACTIVITY_LABEL[name]}ของ ${stock?.symbol ?? stockId}`,
-    metadata: { stock_id: stockId, target_id: id, source: name },
-  });
+  }, 'Stock activity log');
 }
 
 export async function fetchAllTrades() {
@@ -381,6 +431,8 @@ export async function fetchAllTrades() {
       ...trade,
       symbol: stock.symbol,
       port_type: trade.port_type || stock.port_type,
+      country: stock.country,
+      asset_type: stock.asset_type,
       stocks: stock,
     })),
   );
@@ -393,6 +445,8 @@ export async function fetchAllDividends() {
       ...payment,
       symbol: stock.symbol,
       port_type: stock.port_type,
+      country: stock.country,
+      asset_type: stock.asset_type,
       stocks: stock,
     })),
   );

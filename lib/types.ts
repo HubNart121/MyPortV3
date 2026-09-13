@@ -7,6 +7,11 @@ export type AssetType = string;
 export const PORT_TYPE = ['Private', 'Business'] as const;
 export type PortType = string;
 
+export const PLATFORM_TRADE = ['streaming', 'innovestx', 'Dime'] as const;
+
+export const STOCK_COUNTRY = ['THAI', 'USA'] as const;
+export type StockCountry = string;
+
 export const RISK_CATEGORY = [
   '🟢 Defensive',
   '🟢 Income / Dividend',
@@ -21,6 +26,19 @@ export type RiskCategory = typeof RISK_CATEGORY[number];
 
 export const CASH_TRANSACTION_TYPE = ['deposit', 'withdrawal'] as const;
 export type CashTransactionType = typeof CASH_TRANSACTION_TYPE[number];
+
+export const BANK_ACCOUNT_TYPE = ['Business', 'Private'] as const;
+export type BankAccountType = typeof BANK_ACCOUNT_TYPE[number];
+
+export interface BankAccount {
+  id: string;
+  account_number: string | null;
+  account_type: BankAccountType;
+  balance: number;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface CashTransaction {
   id: string;
@@ -41,6 +59,8 @@ export interface Stock {
   status: StockStatus;
   asset_type: AssetType;
   port_type: PortType;
+  country: StockCountry;
+  platform_trade?: string | null;
   risk_category: RiskCategory | null;
   dividend_per_share: number;
   expected_dividend_per_year: number;
@@ -125,6 +145,7 @@ export interface BackupData {
   files?: FileResource[];
   informations?: InfoResource[];
   cash_transactions?: CashTransaction[];
+  bank_accounts?: BankAccount[];
 }
 
 export interface BackupCategoryCounts {
@@ -135,6 +156,7 @@ export interface BackupCategoryCounts {
   cash_transactions: number;
   files: number;
   informations: number;
+  bank_accounts: number;
 }
 
 export interface BackupManifest {
@@ -142,6 +164,7 @@ export interface BackupManifest {
   files_scope: 'metadata-and-links';
   excluded_categories: ['activity_logs'];
   categories: BackupCategoryCounts;
+  content_checksum?: string;
 }
 
 export interface FileResource {

@@ -67,7 +67,10 @@ export default function CashTransactionsPage() {
     queryFn: fetchCashTransactions,
   });
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['cash-transactions'] });
+  const refresh = async () => {
+    void queryClient.invalidateQueries({ queryKey: ['cash-transactions'] });
+    void queryClient.invalidateQueries({ queryKey: ['bank-accounts'] });
+  };
   const saveMutation = useMutation({
     mutationFn: async (input: CashTransactionInput) => {
       if (editing) return updateCashTransaction(editing.id, input);

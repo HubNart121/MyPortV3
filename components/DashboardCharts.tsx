@@ -52,6 +52,7 @@ interface ChartDataItem {
 }
 
 interface DashboardChartsProps {
+  countryData: ChartDataItem[];
   portData: ChartDataItem[];
   sectorData: ChartDataItem[];
   assetData: ChartDataItem[];
@@ -65,7 +66,7 @@ interface DashboardChartsProps {
 
 import { useState, useEffect } from 'react';
 
-export function DashboardCharts({ portData, sectorData, assetData, riskData, symbolData, stackedData }: DashboardChartsProps) {
+export function DashboardCharts({ portData, countryData, sectorData, assetData, riskData, symbolData, stackedData }: DashboardChartsProps) {
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -75,7 +76,7 @@ export function DashboardCharts({ portData, sectorData, assetData, riskData, sym
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const hasData = portData.length > 0 || sectorData.length > 0 || assetData.length > 0 || riskData.length > 0 || symbolData.length > 0;
+  const hasData = countryData.length > 0 || portData.length > 0 || sectorData.length > 0 || assetData.length > 0 || riskData.length > 0 || symbolData.length > 0;
 
   if (!hasData) return null;
 
@@ -337,6 +338,42 @@ export function DashboardCharts({ portData, sectorData, assetData, riskData, sym
               </ResponsiveContainer>
             </div>
             {renderAllocationLegend(portData)}
+          </div>
+        )}
+
+        {/* Company Country Chart */}
+        {countryData.length > 0 && (
+          <div className="panel allocation-card">
+            <div className="panel-header allocation-card-header">
+              <div>
+                <div className="panel-title">สัดส่วนหุ้นประเทศ (Country)</div>
+                <div className="allocation-card-subtitle">ประเทศบริษัทต้นทาง · ตามเงินลงทุนปัจจุบันในพอร์ตที่เลือก</div>
+              </div>
+            </div>
+            <div className="allocation-chart">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={CHART_INITIAL_DIMENSION}>
+                <PieChart>
+                  <Pie
+                    data={countryData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={isMobile ? 46 : 54}
+                    outerRadius={isMobile ? 68 : 82}
+                    paddingAngle={3}
+                    dataKey="value"
+                    stroke="none"
+                    label={renderCustomizedLabel}
+                    labelLine={{ stroke: 'var(--text-muted)', strokeWidth: 1 }}
+                  >
+                    {countryData.map((entry, index) => (
+                      <Cell key={entry.name} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<AllocationTooltip total={countryData.reduce((sum, item) => sum + item.value, 0)} />} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            {renderAllocationLegend(countryData)}
           </div>
         )}
 

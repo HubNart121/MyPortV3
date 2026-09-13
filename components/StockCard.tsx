@@ -4,7 +4,7 @@ import type { KeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import type { StockWithStats } from '@/lib/types';
 import { formatNumber, formatCurrency } from '@/lib/calculations';
-import { StatusBadge, AssetBadge, PortBadge, RiskBadge } from './Badges';
+import { StatusBadge, AssetBadge, CountryBadge, PortBadge, RiskBadge } from './Badges';
 import { ShareStockButton } from './ShareStockButton';
 
 interface StockCardProps {
@@ -172,6 +172,7 @@ export function StockCard({ stock }: StockCardProps) {
         <PortBadge portType={stock.port_type} />
         <StatusBadge status={stock.status} />
         <AssetBadge assetType={stock.asset_type} />
+        <CountryBadge country={stock.country} />
         {stock.risk_category && <RiskBadge riskCategory={stock.risk_category} />}
       </div>
     </div>

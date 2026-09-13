@@ -12,6 +12,7 @@ const navItems = [
   { href: '/stocks/new', label: 'Add Stock', icon: '+' },
   { href: '/history', label: 'Trading History', icon: '▤' },
   { href: '/transactions', label: 'ฝากเงิน / ถอนเงิน', icon: '⇄' },
+  { href: '/bank-accounts', label: 'บัญชีเงินฝาก', icon: '▣' },
   { href: '/files', label: 'จัดการไฟล์ (Files)', icon: '📂' },
   { href: '/info', label: 'คลังความรู้ (Inf.)', icon: 'ℹ' },
   { href: '/backup', label: 'Backup / Restore', icon: '⊡' },

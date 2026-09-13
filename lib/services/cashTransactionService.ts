@@ -13,6 +13,7 @@ import { auth, db, isFirebaseConfigured } from '../firebase';
 import { getSupabase } from '../supabase';
 import type { CashTransaction } from '../types';
 import { recordActivityLog } from './activityLogService';
+import { applyBankAccountMovement } from './bankAccountService';
 
 const COLLECTION_NAME = 'cash_transactions';
 
@@ -51,6 +52,7 @@ export async function addCashTransaction(input: CashTransactionInput): Promise<v
   const payload = { ...input, amount: Number(input.amount), created_at: now, updated_at: now };
   if (isFirebaseConfigured && db) {
     const ref = await addDoc(transactionCollection(), payload);
+    await applyBankAccountMovement(input.port_type as 'Business' | 'Private', input.type === 'deposit' ? -payload.amount : payload.amount);
     await recordActivityLog({
       action: 'create',
       category: 'cash',
@@ -63,6 +65,7 @@ export async function addCashTransaction(input: CashTransactionInput): Promise<v
   const supabase = getSupabase();
   const { data, error } = await supabase.from(COLLECTION_NAME).insert(payload).select('id').single();
   if (error) throw error;
+  await applyBankAccountMovement(input.port_type as 'Business' | 'Private', input.type === 'deposit' ? -payload.amount : payload.amount);
   await recordActivityLog({
     action: 'create',
     category: 'cash',
@@ -89,6 +92,9 @@ export async function importCashTransactions(inputs: CashTransactionInput[]): Pr
       });
       await batch.commit();
     }
+    for (const input of inputs) {
+      await applyBankAccountMovement(input.port_type as 'Business' | 'Private', input.type === 'deposit' ? -Number(input.amount) : Number(input.amount));
+    }
     await recordActivityLog({
       action: 'import',
       category: 'cash',
@@ -106,6 +112,9 @@ export async function importCashTransactions(inputs: CashTransactionInput[]): Pr
     updated_at: now,
   })));
   if (error) throw error;
+  for (const input of inputs) {
+    await applyBankAccountMovement(input.port_type as 'Business' | 'Private', input.type === 'deposit' ? -Number(input.amount) : Number(input.amount));
+  }
   await recordActivityLog({
     action: 'import',
     category: 'cash',
@@ -117,9 +126,12 @@ export async function importCashTransactions(inputs: CashTransactionInput[]): Pr
 }
 
 export async function updateCashTransaction(id: string, input: CashTransactionInput): Promise<void> {
+  const previous = (await fetchCashTransactions()).find((item) => item.id === id);
   const payload = { ...input, amount: Number(input.amount), updated_at: new Date().toISOString() };
   if (isFirebaseConfigured && db) {
     await updateDoc(doc(transactionCollection(), id), payload);
+    if (previous) await applyBankAccountMovement(previous.port_type as 'Business' | 'Private', previous.type === 'deposit' ? Number(previous.amount) : -Number(previous.amount));
+    await applyBankAccountMovement(input.port_type as 'Business' | 'Private', input.type === 'deposit' ? -payload.amount : payload.amount);
     await recordActivityLog({
       action: 'update',
       category: 'cash',
@@ -132,6 +144,8 @@ export async function updateCashTransaction(id: string, input: CashTransactionIn
   const supabase = getSupabase();
   const { error } = await supabase.from(COLLECTION_NAME).update(payload).eq('id', id);
   if (error) throw error;
+  if (previous) await applyBankAccountMovement(previous.port_type as 'Business' | 'Private', previous.type === 'deposit' ? Number(previous.amount) : -Number(previous.amount));
+  await applyBankAccountMovement(input.port_type as 'Business' | 'Private', input.type === 'deposit' ? -payload.amount : payload.amount);
   await recordActivityLog({
     action: 'update',
     category: 'cash',
@@ -142,8 +156,10 @@ export async function updateCashTransaction(id: string, input: CashTransactionIn
 }
 
 export async function deleteCashTransaction(id: string): Promise<void> {
+  const previous = (await fetchCashTransactions()).find((item) => item.id === id);
   if (isFirebaseConfigured && db) {
     await deleteDoc(doc(transactionCollection(), id));
+    if (previous) await applyBankAccountMovement(previous.port_type as 'Business' | 'Private', previous.type === 'deposit' ? Number(previous.amount) : -Number(previous.amount));
     await recordActivityLog({
       action: 'delete',
       category: 'cash',
@@ -156,6 +172,7 @@ export async function deleteCashTransaction(id: string): Promise<void> {
   const supabase = getSupabase();
   const { error } = await supabase.from(COLLECTION_NAME).delete().eq('id', id);
   if (error) throw error;
+  if (previous) await applyBankAccountMovement(previous.port_type as 'Business' | 'Private', previous.type === 'deposit' ? Number(previous.amount) : -Number(previous.amount));
   await recordActivityLog({
     action: 'delete',
     category: 'cash',
@@ -173,6 +190,10 @@ export async function clearCashTransactions(): Promise<number> {
       snapshot.docs.slice(start, start + 400).forEach((item) => batch.delete(item.ref));
       await batch.commit();
     }
+    for (const item of snapshot.docs) {
+      const transaction = item.data() as CashTransaction;
+      await applyBankAccountMovement(transaction.port_type as 'Business' | 'Private', transaction.type === 'deposit' ? Number(transaction.amount) : -Number(transaction.amount));
+    }
     await recordActivityLog({
       action: 'clear',
       category: 'cash',
@@ -188,8 +209,12 @@ export async function clearCashTransactions(): Promise<number> {
     .from(COLLECTION_NAME)
     .delete()
     .not('id', 'is', null)
-    .select('id');
+    .select('*');
   if (error) throw error;
+  for (const item of data ?? []) {
+    const transaction = item as CashTransaction;
+    await applyBankAccountMovement(transaction.port_type as 'Business' | 'Private', transaction.type === 'deposit' ? Number(transaction.amount) : -Number(transaction.amount));
+  }
   const count = data?.length ?? 0;
   await recordActivityLog({
     action: 'clear',

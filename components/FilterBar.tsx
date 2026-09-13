@@ -1,6 +1,6 @@
 'use client';
 
-import { STOCK_STATUS, ASSET_TYPE, PORT_TYPE, RISK_CATEGORY } from '@/lib/types';
+import { STOCK_STATUS, ASSET_TYPE, PORT_TYPE, RISK_CATEGORY, STOCK_COUNTRY } from '@/lib/types';
 import type { StockStatus, AssetType, PortType, RiskCategory } from '@/lib/types';
 
 export type RealizedOutcomeFilter = 'All' | 'Profit' | 'Loss';
@@ -11,6 +11,7 @@ interface FilterBarProps {
   onRealizedOutcomeChange: (outcome: RealizedOutcomeFilter) => void;
   onAssetTypeChange: (type: AssetType | 'All') => void;
   onPortChange: (port: PortType | 'All') => void;
+  onCountryChange: (country: string) => void;
   onRiskCategoryChange: (category: RiskCategoryFilter) => void;
   onYearChange: (year: string) => void;
   onSortChange: (sort: string) => void;
@@ -20,12 +21,14 @@ interface FilterBarProps {
   activeRealizedOutcome: RealizedOutcomeFilter;
   activeType: AssetType | 'All';
   activePort: PortType | 'All';
+  activeCountry: string;
   activeRiskCategory: RiskCategoryFilter;
   activeYear: string;
   activeSort: string;
   totalCount: number;
   filteredCount: number;
   availablePorts?: string[];
+  availableCountries?: string[];
   availableYears: string[];
 }
 
@@ -34,6 +37,7 @@ export function FilterBar({
   onRealizedOutcomeChange,
   onAssetTypeChange,
   onPortChange,
+  onCountryChange,
   onRiskCategoryChange,
   onYearChange,
   onSortChange,
@@ -41,6 +45,7 @@ export function FilterBar({
   activeRealizedOutcome,
   activeType,
   activePort,
+  activeCountry,
   activeRiskCategory,
   activeYear,
   activeSort,
@@ -49,6 +54,7 @@ export function FilterBar({
   totalCount,
   filteredCount,
   availablePorts,
+  availableCountries,
   availableYears,
 }: FilterBarProps) {
   return (
@@ -74,6 +80,29 @@ export function FilterBar({
               onClick={() => onPortChange(p)}
             >
               {p}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '10px' }}>
+        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '6px' }}>
+          Filter by Company Country
+        </div>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <button
+            className={`filter-chip ${activeCountry === 'All' ? 'active' : ''}`}
+            onClick={() => onCountryChange('All')}
+          >
+            All Countries
+          </button>
+          {(availableCountries || [...STOCK_COUNTRY]).map((country) => (
+            <button
+              key={country}
+              className={`filter-chip ${activeCountry === country ? 'active' : ''}`}
+              onClick={() => onCountryChange(country)}
+            >
+              {country}
             </button>
           ))}
         </div>

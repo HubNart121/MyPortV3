@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { BACKUP_SCHEMA_VERSION } from '../backup.ts';
-import { RISK_CATEGORY } from '../types.ts';
+import { BACKUP_SCHEMA_VERSION, getBackupContentChecksum } from '../backup.ts';
+import { BANK_ACCOUNT_TYPE, RISK_CATEGORY } from '../types.ts';
+import { stockIdentityKey } from '../stock-country.ts';
 
 const shortText = z.string().max(500);
 const nullableText = z.string().max(10_000).nullable();
@@ -55,6 +56,8 @@ const stockSchema = z.object({
   status: shortText,
   asset_type: shortText,
   port_type: shortText,
+  country: shortText.default('THAI').transform((value) => value.trim().toUpperCase()).pipe(z.string().min(1).max(500)),
+  platform_trade: shortText.nullable().default(null),
   risk_category: riskCategory.default(null),
   dividend_per_share: positiveOrZero,
   expected_dividend_per_year: positiveOrZero.default(0),
@@ -102,6 +105,16 @@ const cashTransactionSchema = z.object({
   updated_at: z.string().max(64),
 });
 
+const bankAccountSchema = z.object({
+  id: documentId,
+  account_number: nullableText.default(null),
+  account_type: z.enum(BANK_ACCOUNT_TYPE),
+  balance: positiveOrZero.default(0),
+  note: nullableText.default(null),
+  created_at: z.string().max(64),
+  updated_at: z.string().max(64),
+});
+
 export const backupCategoryCountsSchema = z.object({
   stocks: z.number().int().nonnegative(),
   buy_rounds: z.number().int().nonnegative(),
@@ -110,13 +123,17 @@ export const backupCategoryCountsSchema = z.object({
   cash_transactions: z.number().int().nonnegative(),
   files: z.number().int().nonnegative(),
   informations: z.number().int().nonnegative(),
+  bank_accounts: z.number().int().nonnegative(),
 });
 
 const backupManifestSchema = z.object({
   format: z.literal('my-port-v2-backup'),
   files_scope: z.literal('metadata-and-links'),
   excluded_categories: z.tuple([z.literal('activity_logs')]).default(['activity_logs']),
-  categories: backupCategoryCountsSchema,
+  categories: backupCategoryCountsSchema.extend({
+    bank_accounts: z.number().int().nonnegative().default(0),
+  }),
+  content_checksum: z.string().regex(/^fnv1a64:[0-9a-f]{16}$/).optional(),
 });
 
 export const backupDataSchema = z.object({
@@ -128,6 +145,7 @@ export const backupDataSchema = z.object({
   files: z.array(fileSchema).max(2_000).default([]),
   informations: z.array(informationSchema).max(2_000).default([]),
   cash_transactions: z.array(cashTransactionSchema).max(10_000).default([]),
+  bank_accounts: z.array(bankAccountSchema).max(1_000).default([]),
 }).superRefine((backup, context) => {
   const ensureUniqueIds = (
     values: Array<{ id: string }>,
@@ -150,8 +168,15 @@ export const backupDataSchema = z.object({
   ensureUniqueIds(backup.files, ['files']);
   ensureUniqueIds(backup.informations, ['informations']);
   ensureUniqueIds(backup.cash_transactions, ['cash_transactions']);
+  ensureUniqueIds(backup.bank_accounts, ['bank_accounts']);
 
+  const stockIdentities = new Set<string>();
   backup.stocks.forEach((stock, stockIndex) => {
+    const identity = stockIdentityKey(stock.symbol, stock.port_type, stock.country);
+    if (stockIdentities.has(identity)) {
+      context.addIssue({ code: 'custom', path: ['stocks', stockIndex, 'symbol'], message: 'Duplicate Symbol + Port + Country' });
+    }
+    stockIdentities.add(identity);
     const childCollections = [
       ['buy_rounds', stock.buy_rounds],
       ['realized_trades', stock.realized_trades],
@@ -172,7 +197,16 @@ export const backupDataSchema = z.object({
     });
   });
 
-  if (!backup.manifest) return;
+  if (!backup.manifest) {
+    if (backup.schema_version === BACKUP_SCHEMA_VERSION) {
+      context.addIssue({
+        code: 'custom',
+        path: ['manifest'],
+        message: 'Current backup schema requires a manifest',
+      });
+    }
+    return;
+  }
 
   const actual = {
     stocks: backup.stocks.length,
@@ -182,6 +216,7 @@ export const backupDataSchema = z.object({
     cash_transactions: backup.cash_transactions.length,
     files: backup.files.length,
     informations: backup.informations.length,
+    bank_accounts: backup.bank_accounts.length,
   };
 
   for (const [category, count] of Object.entries(actual)) {
@@ -192,5 +227,20 @@ export const backupDataSchema = z.object({
         message: `Backup category count mismatch: ${category}`,
       });
     }
+  }
+
+  const expectedChecksum = getBackupContentChecksum(backup);
+  if (backup.schema_version === BACKUP_SCHEMA_VERSION && !backup.manifest.content_checksum) {
+    context.addIssue({
+      code: 'custom',
+      path: ['manifest', 'content_checksum'],
+      message: 'Current backup schema requires a content checksum',
+    });
+  } else if (backup.manifest.content_checksum && backup.manifest.content_checksum !== expectedChecksum) {
+    context.addIssue({
+      code: 'custom',
+      path: ['manifest', 'content_checksum'],
+      message: 'Backup content checksum mismatch',
+    });
   }
 });

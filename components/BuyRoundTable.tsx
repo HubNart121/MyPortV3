@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useToast } from './Toast';
 import type { BuyRound, RealizedTrade } from '@/lib/types';
 import { calculatePositionTimeline, formatCurrency, formatNumber, formatThaiDate } from '@/lib/calculations';
 import { BuyRoundForm } from './BuyRoundForm';
@@ -37,6 +38,7 @@ export function BuyRoundTable({
   unrealizedProfit,
   unrealizedProfitPct,
 }: BuyRoundTableProps) {
+  const toast = useToast();
   const [showForm, setShowForm] = useState(false);
   const [editingRound, setEditingRound] = useState<BuyRound | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -48,6 +50,8 @@ export function BuyRoundTable({
     try {
       await onAdd(data);
       setShowForm(false);
+    } catch (error) {
+      toast.show(error instanceof Error ? error.message : 'ดำเนินการไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ', 'error');
     } finally {
       setSaving(false);
     }
@@ -59,6 +63,8 @@ export function BuyRoundTable({
     try {
       await onEdit(editingRound.id, data);
       setEditingRound(null);
+    } catch (error) {
+      toast.show(error instanceof Error ? error.message : 'ดำเนินการไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ', 'error');
     } finally {
       setSaving(false);
     }
@@ -69,6 +75,8 @@ export function BuyRoundTable({
     setDeleting(id);
     try {
       await onDelete(id);
+    } catch (error) {
+      toast.show(error instanceof Error ? error.message : 'ดำเนินการไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ', 'error');
     } finally {
       setDeleting(null);
     }

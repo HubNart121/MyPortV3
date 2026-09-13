@@ -1,7 +1,7 @@
 import 'server-only';
 
 import type { DocumentData } from 'firebase-admin/firestore';
-import type { BackupData, BuyRound, CashTransaction, DividendPayment, FileResource, InfoResource, RealizedTrade, Stock } from '@/lib/types';
+import type { BackupData, BankAccount, BuyRound, CashTransaction, DividendPayment, FileResource, InfoResource, RealizedTrade, Stock } from '@/lib/types';
 import { completeBackupData } from '@/lib/backup';
 import { adminFirestore, firebaseUserForEmail } from './firebase-admin';
 
@@ -40,18 +40,20 @@ export async function exportBackupForUid(uid: string): Promise<BackupData> {
     }),
   );
 
-  const [filesSnapshot, informationSnapshot, cashTransactionsSnapshot] = await Promise.all([
+  const [filesSnapshot, informationSnapshot, cashTransactionsSnapshot, bankAccountsSnapshot] = await Promise.all([
     userRoot.collection('files').get(),
     userRoot.collection('informations').get(),
     userRoot.collection('cash_transactions').get(),
+    userRoot.collection('bank_accounts').get(),
   ]);
 
   return completeBackupData({
-    version: '5.0 (Complete Firebase account backup)',
+    version: '7.0 (Integrity-checked Firebase account backup)',
     exported_at: new Date().toISOString(),
     stocks,
     files: filesSnapshot.docs.map((doc) => withId<FileResource>(doc.id, doc.data())),
     informations: informationSnapshot.docs.map((doc) => withId<InfoResource>(doc.id, doc.data())),
     cash_transactions: cashTransactionsSnapshot.docs.map((doc) => withId<CashTransaction>(doc.id, doc.data())),
+    bank_accounts: bankAccountsSnapshot.docs.map((doc) => withId<BankAccount>(doc.id, doc.data())),
   });
 }

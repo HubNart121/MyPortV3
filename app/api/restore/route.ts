@@ -134,6 +134,7 @@ export async function POST(request: Request) {
         cash_transactions: result.counts.cash_transactions,
         files: result.counts.files,
         informations: result.counts.informations,
+        bank_accounts: result.counts.bank_accounts,
         recovery_id: result.recoveryId,
       },
     });

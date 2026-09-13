@@ -25,6 +25,7 @@ export default function PortfolioPage() {
   const [realizedOutcome, setRealizedOutcome] = useState<RealizedOutcomeFilter>('All');
   const [filterType, setFilterType] = useState<AssetType | 'All'>('All');
   const [filterPort, setFilterPort] = useState<PortType | 'All'>('All');
+  const [filterCountry, setFilterCountry] = useState('All');
   const [filterRiskCategory, setFilterRiskCategory] = useState<RiskCategoryFilter>('All');
   const [filterYear, setFilterYear] = useState('All');
   const [activeSort, setActiveSort] = useState<string>('created_desc');
@@ -48,6 +49,13 @@ export default function PortfolioPage() {
     ports.add('Private');
     ports.add('Business');
     return Array.from(ports).sort();
+  }, [rawStocks]);
+
+  const uniqueCountries = useMemo(() => {
+    const countries = new Set(rawStocks.map((stock) => stock.country || 'THAI'));
+    countries.add('THAI');
+    countries.add('USA');
+    return Array.from(countries).sort();
   }, [rawStocks]);
 
   const availableYears = useMemo(() => {
@@ -79,6 +87,7 @@ export default function PortfolioPage() {
         || (realizedOutcome === 'Loss' && s.total_realized_profit < 0);
       const typeOk = filterType === 'All' || s.asset_type === filterType;
       const portOk = filterPort === 'All' || s.port_type === filterPort;
+      const countryOk = filterCountry === 'All' || (s.country || 'THAI') === filterCountry;
       const riskCategoryOk = filterRiskCategory === 'All'
         || (filterRiskCategory === 'Unspecified' && !s.risk_category)
         || s.risk_category === filterRiskCategory;
@@ -95,7 +104,7 @@ export default function PortfolioPage() {
           ? relevantYears.includes(filterYear)
           : fallbackYear === filterYear);
       const searchOk = searchQuery === '' || s.symbol.toUpperCase().includes(searchQuery.toUpperCase());
-      return statusOk && realizedOutcomeOk && typeOk && portOk && riskCategoryOk && yearOk && searchOk;
+      return statusOk && realizedOutcomeOk && typeOk && portOk && countryOk && riskCategoryOk && yearOk && searchOk;
     });
 
     result = result.sort((a, b) => {
@@ -121,7 +130,7 @@ export default function PortfolioPage() {
     });
 
     return result;
-  }, [stocks, filterStatus, realizedOutcome, filterType, filterPort, filterRiskCategory, filterYear, activeSort, searchQuery]);
+  }, [stocks, filterStatus, realizedOutcome, filterType, filterPort, filterCountry, filterRiskCategory, filterYear, activeSort, searchQuery]);
 
   const handleStatusChange = (status: StockStatus | 'All') => {
     setFilterStatus(status);
@@ -166,6 +175,7 @@ export default function PortfolioPage() {
           onRealizedOutcomeChange={setRealizedOutcome}
           onAssetTypeChange={setFilterType}
           onPortChange={setFilterPort}
+          onCountryChange={setFilterCountry}
           onRiskCategoryChange={setFilterRiskCategory}
           onYearChange={setFilterYear}
           onSortChange={setActiveSort}
@@ -175,12 +185,14 @@ export default function PortfolioPage() {
           activeRealizedOutcome={realizedOutcome}
           activeType={filterType}
           activePort={filterPort}
+          activeCountry={filterCountry}
           activeRiskCategory={filterRiskCategory}
           activeYear={filterYear}
           activeSort={activeSort}
           totalCount={stocks.length}
           filteredCount={filtered.length}
           availablePorts={uniquePorts}
+          availableCountries={uniqueCountries}
           availableYears={availableYears}
         />
 

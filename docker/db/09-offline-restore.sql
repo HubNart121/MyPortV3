@@ -1,4 +1,4 @@
--- Atomically replace all seven backup categories from Backup JSON v5.
+-- Atomically replace all eight backup categories from normalized Backup JSON v6.
 -- Incoming Firebase document IDs are intentionally remapped to PostgreSQL UUIDs.
 CREATE OR REPLACE FUNCTION public.restore_backup_v5(payload JSONB)
 RETURNS JSONB
@@ -19,7 +19,8 @@ BEGIN
      OR jsonb_typeof(payload->'stocks') <> 'array'
      OR jsonb_typeof(payload->'files') <> 'array'
      OR jsonb_typeof(payload->'informations') <> 'array'
-     OR jsonb_typeof(payload->'cash_transactions') <> 'array' THEN
+     OR jsonb_typeof(payload->'cash_transactions') <> 'array'
+     OR jsonb_typeof(payload->'bank_accounts') IS DISTINCT FROM 'array' THEN
     RAISE EXCEPTION 'Invalid My Port backup payload';
   END IF;
 
@@ -29,6 +30,7 @@ BEGIN
   ) ON COMMIT DROP;
 
   DELETE FROM public.cash_transactions;
+  DELETE FROM public.bank_accounts;
   DELETE FROM public.files;
   DELETE FROM public.informations;
   DELETE FROM public.stocks;
@@ -39,7 +41,7 @@ BEGIN
     VALUES (stock_item->>'id', new_stock_id);
 
     INSERT INTO public.stocks (
-      id, symbol, name, sector, status, asset_type, port_type, risk_category,
+      id, symbol, name, sector, status, asset_type, port_type, country, platform_trade, risk_category,
       dividend_per_share, expected_dividend_per_year, current_price, target_price, graph_url, link_url,
       note, created_at, updated_at
     ) VALUES (
@@ -50,6 +52,8 @@ BEGIN
       stock_item->>'status',
       stock_item->>'asset_type',
       stock_item->>'port_type',
+      COALESCE(NULLIF(UPPER(BTRIM(stock_item->>'country')), ''), 'THAI'),
+      NULLIF(stock_item->>'platform_trade', ''),
       NULLIF(stock_item->>'risk_category', ''),
       COALESCE((stock_item->>'dividend_per_share')::NUMERIC, 0),
       COALESCE((stock_item->>'expected_dividend_per_year')::NUMERIC, 0),
@@ -156,6 +160,16 @@ BEGIN
     );
   END LOOP;
 
+  FOR item IN SELECT value FROM jsonb_array_elements(payload->'bank_accounts') LOOP
+    INSERT INTO public.bank_accounts (
+      id, account_number, account_type, balance, note, created_at, updated_at
+    ) VALUES (
+      gen_random_uuid(), item->>'account_number', item->>'account_type',
+      (item->>'balance')::NUMERIC, item->>'note',
+      (item->>'created_at')::TIMESTAMPTZ, (item->>'updated_at')::TIMESTAMPTZ
+    );
+  END LOOP;
+
   SELECT jsonb_build_object(
     'stocks', (SELECT COUNT(*) FROM public.stocks),
     'buy_rounds', (SELECT COUNT(*) FROM public.buy_rounds),
@@ -163,7 +177,8 @@ BEGIN
     'dividend_payments', (SELECT COUNT(*) FROM public.dividend_payments),
     'cash_transactions', (SELECT COUNT(*) FROM public.cash_transactions),
     'files', (SELECT COUNT(*) FROM public.files),
-    'informations', (SELECT COUNT(*) FROM public.informations)
+    'informations', (SELECT COUNT(*) FROM public.informations),
+    'bank_accounts', (SELECT COUNT(*) FROM public.bank_accounts)
   ) INTO actual_counts;
 
   expected_counts := payload#>'{manifest,categories}';

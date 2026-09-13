@@ -51,6 +51,14 @@ export function PortBadge({ portType }: { portType: PortType }) {
   );
 }
 
+export function CountryBadge({ country }: { country: string }) {
+  return (
+    <span className="badge" style={{ borderColor: 'var(--amber)', color: 'var(--amber)' }}>
+      {country || 'THAI'}
+    </span>
+  );
+}
+
 export function RiskBadge({ riskCategory }: { riskCategory: RiskCategory }) {
   const riskLevel = riskCategory.startsWith('🟢')
     ? 'risk-low'

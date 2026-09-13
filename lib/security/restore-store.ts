@@ -9,6 +9,7 @@ import {
 } from '@/lib/backup';
 import { adminFirestore, firebaseUserForEmail } from './firebase-admin';
 import { exportBackupForUid } from './backup-store';
+import { runRestoreWrites, settleRestoreOperations } from '../restore-operations.ts';
 
 const RESTORE_LOCK_MS = 10 * 60 * 1_000;
 const RECOVERY_SNAPSHOTS_TO_KEEP = 3;
@@ -44,54 +45,63 @@ async function recursivelyDelete(refs: DocumentReference[]): Promise<void> {
   const db = adminFirestore();
   const concurrency = 12;
   for (let start = 0; start < refs.length; start += concurrency) {
-    await Promise.all(refs.slice(start, start + concurrency).map((ref) => db.recursiveDelete(ref)));
+    await settleRestoreOperations(refs.slice(start, start + concurrency).map((ref) => db.recursiveDelete(ref)));
   }
 }
 
 async function clearBackupCollections(root: DocumentReference): Promise<void> {
-  const [stocks, files, informations, cashTransactions] = await Promise.all([
+  const [stocks, files, informations, cashTransactions, bankAccounts] = await Promise.all([
     root.collection('stocks').get(),
     root.collection('files').get(),
     root.collection('informations').get(),
     root.collection('cash_transactions').get(),
+    root.collection('bank_accounts').get(),
   ]);
   await recursivelyDelete([
     ...stocks.docs.map((item) => item.ref),
     ...files.docs.map((item) => item.ref),
     ...informations.docs.map((item) => item.ref),
     ...cashTransactions.docs.map((item) => item.ref),
+    ...bankAccounts.docs.map((item) => item.ref),
   ]);
 }
 
 async function writeBackupCollections(root: DocumentReference, backup: BackupData): Promise<void> {
   const writer = adminFirestore().bulkWriter();
+  await runRestoreWrites((track) => {
+    const set = (reference: DocumentReference, data: Record<string, unknown>) => {
+      const operation = writer.set(reference, data);
+      track(operation);
+      return operation;
+    };
 
-  backup.files?.forEach(({ id, ...data }) => writer.set(root.collection('files').doc(id), data));
-  backup.informations?.forEach(({ id, ...data }) => writer.set(root.collection('informations').doc(id), data));
-  backup.cash_transactions?.forEach(({ id, ...data }) => writer.set(root.collection('cash_transactions').doc(id), data));
+    backup.files?.forEach(({ id, ...data }) => set(root.collection('files').doc(id), data));
+    backup.informations?.forEach(({ id, ...data }) => set(root.collection('informations').doc(id), data));
+    backup.cash_transactions?.forEach(({ id, ...data }) => set(root.collection('cash_transactions').doc(id), data));
+    backup.bank_accounts?.forEach(({ id, ...data }) => set(root.collection('bank_accounts').doc(id), data));
 
-  backup.stocks.forEach((stock) => {
-    const {
-      id,
-      buy_rounds = [],
-      realized_trades = [],
-      dividend_payments = [],
-      ...stockData
-    } = stock;
-    const stockRef = root.collection('stocks').doc(id);
-    writer.set(stockRef, stockData);
-    buy_rounds.forEach(({ id: itemId, ...data }) => {
-      writer.set(stockRef.collection('buy_rounds').doc(itemId), { ...data, stock_id: id });
+    backup.stocks.forEach((stock) => {
+      const {
+        id,
+        buy_rounds = [],
+        realized_trades = [],
+        dividend_payments = [],
+        ...stockData
+      } = stock;
+      const stockRef = root.collection('stocks').doc(id);
+      set(stockRef, stockData);
+      buy_rounds.forEach(({ id: itemId, ...data }) => {
+        set(stockRef.collection('buy_rounds').doc(itemId), { ...data, stock_id: id });
+      });
+      realized_trades.forEach(({ id: itemId, ...data }) => {
+        set(stockRef.collection('realized_trades').doc(itemId), { ...data, stock_id: id });
+      });
+      dividend_payments.forEach(({ id: itemId, ...data }) => {
+        set(stockRef.collection('dividend_payments').doc(itemId), { ...data, stock_id: id });
+      });
     });
-    realized_trades.forEach(({ id: itemId, ...data }) => {
-      writer.set(stockRef.collection('realized_trades').doc(itemId), { ...data, stock_id: id });
-    });
-    dividend_payments.forEach(({ id: itemId, ...data }) => {
-      writer.set(stockRef.collection('dividend_payments').doc(itemId), { ...data, stock_id: id });
-    });
-  });
 
-  await writer.close();
+  }, () => writer.close());
 }
 
 async function replaceUserBackup(uid: string, backup: BackupData): Promise<void> {
@@ -187,7 +197,8 @@ export async function restoreJsonBackupForEmail(
     mutationStarted = true;
     await replaceUserBackup(uid, backup);
     const counts = await verifyStoredBackup(uid, backup);
-    await recoveryRef.update({ status: 'verified', completed_at: Date.now() });
+    await recoveryRef.update({ status: 'verified', completed_at: Date.now() })
+      .catch((error) => console.warn('Restore verified, but recovery status update failed:', error));
     await pruneRecoverySnapshots(uid).catch(() => undefined);
     return { counts, recoveryId: jobId };
   } catch (error) {
@@ -196,7 +207,8 @@ export async function restoreJsonBackupForEmail(
     try {
       await replaceUserBackup(uid, currentBackup);
       await verifyStoredBackup(uid, currentBackup);
-      await recoveryRef.update({ status: 'rolled_back', completed_at: Date.now() });
+      await recoveryRef.update({ status: 'rolled_back', completed_at: Date.now() })
+        .catch((error) => console.warn('Rollback verified, but recovery status update failed:', error));
       throw new RestoreRolledBackError(jobId);
     } catch (rollbackError) {
       if (rollbackError instanceof RestoreRolledBackError) throw rollbackError;

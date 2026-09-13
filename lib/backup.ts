@@ -1,10 +1,22 @@
 import type { BackupCategoryCounts, BackupData, BackupManifest } from './types';
+import { normalizeStockCountry } from './stock-country.ts';
 
-export const BACKUP_SCHEMA_VERSION = 5;
+export const BACKUP_SCHEMA_VERSION = 7;
+
+export const BACKUP_CATEGORY_LABELS = [
+  ['stocks', 'หุ้น'],
+  ['buy_rounds', 'รอบซื้อ'],
+  ['realized_trades', 'รายการขาย'],
+  ['dividend_payments', 'เงินปันผล'],
+  ['cash_transactions', 'ฝาก / ถอน'],
+  ['files', 'รายการไฟล์'],
+  ['informations', 'คลังความรู้'],
+  ['bank_accounts', 'บัญชีธนาคาร'],
+] as const satisfies ReadonlyArray<readonly [keyof BackupCategoryCounts, string]>;
 
 type BackupCollections = Pick<
   BackupData,
-  'stocks' | 'files' | 'informations' | 'cash_transactions'
+  'stocks' | 'files' | 'informations' | 'cash_transactions' | 'bank_accounts'
 >;
 
 export function getBackupCategoryCounts(backup: BackupCollections): BackupCategoryCounts {
@@ -16,6 +28,7 @@ export function getBackupCategoryCounts(backup: BackupCollections): BackupCatego
     cash_transactions: backup.cash_transactions?.length ?? 0,
     files: backup.files?.length ?? 0,
     informations: backup.informations?.length ?? 0,
+    bank_accounts: backup.bank_accounts?.length ?? 0,
   };
 }
 
@@ -25,6 +38,7 @@ export function createBackupManifest(backup: BackupCollections): BackupManifest 
     files_scope: 'metadata-and-links',
     excluded_categories: ['activity_logs'],
     categories: getBackupCategoryCounts(backup),
+    content_checksum: getBackupContentChecksum(backup),
   };
 }
 
@@ -55,9 +69,22 @@ export function getBackupContentSignature(backup: BackupCollections): string {
     files: sortById(backup.files ?? []),
     informations: sortById(backup.informations ?? []),
     cash_transactions: sortById(backup.cash_transactions ?? []),
+    bank_accounts: sortById(backup.bank_accounts ?? []),
   };
 
   return JSON.stringify(sortObjectKeys(comparable));
+}
+
+/** Fast, deterministic corruption check. This is not an authentication signature. */
+export function getBackupContentChecksum(backup: BackupCollections): string {
+  const bytes = new TextEncoder().encode(getBackupContentSignature(backup));
+  let hash = BigInt('0xcbf29ce484222325');
+  const prime = BigInt('0x100000001b3');
+  for (const byte of bytes) {
+    hash ^= BigInt(byte);
+    hash = BigInt.asUintN(64, hash * prime);
+  }
+  return `fnv1a64:${hash.toString(16).padStart(16, '0')}`;
 }
 
 export function completeBackupData(backup: BackupData): BackupData {
@@ -83,10 +110,18 @@ export function completeBackupData(backup: BackupData): BackupData {
       ...transaction,
       note: transaction.note ?? null,
     })),
+    bank_accounts: (backup.bank_accounts ?? []).map((account) => ({
+      ...account,
+      account_number: account.account_number ?? null,
+      balance: Number(account.balance ?? 0),
+      note: account.note ?? null,
+    })),
     stocks: backup.stocks.map((stock) => ({
       ...stock,
+      country: normalizeStockCountry(stock.country),
       name: stock.name ?? null,
       sector: stock.sector ?? null,
+      platform_trade: stock.platform_trade ?? null,
       risk_category: stock.risk_category ?? null,
       dividend_per_share: Number(stock.dividend_per_share ?? 0),
       expected_dividend_per_year: Number(stock.expected_dividend_per_year ?? 0),

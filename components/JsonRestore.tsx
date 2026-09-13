@@ -2,11 +2,11 @@
 
 import { useRef, useState } from 'react';
 import type { BackupCategoryCounts, BackupData } from '@/lib/types';
-import { completeBackupData, getBackupCategoryCounts } from '@/lib/backup';
+import { BACKUP_CATEGORY_LABELS, completeBackupData, getBackupCategoryCounts } from '@/lib/backup';
 import { auth, isFirebaseConfigured } from '@/lib/firebase';
 import { backupDataSchema } from '@/lib/security/backup-schema';
 import { restoreResponseSchema } from '@/lib/security/restore-schema';
-import { apiError, BACKUP_CATEGORY_LABELS } from '@/components/BackupExport';
+import { apiError } from '@/components/BackupExport';
 import { useToast } from '@/components/Toast';
 import { isOfflineMode } from '@/lib/app-mode';
 
@@ -54,6 +54,10 @@ async function restoreApiFetch(backup: BackupData): Promise<Response> {
 
 export function JsonRestore({ onRestoreComplete }: { onRestoreComplete?: () => void | Promise<void> }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectionId = useRef(0);
+  const restoreInFlight = useRef(false);
+  const [sourceSchema, setSourceSchema] = useState<number | undefined>();
+  const [checksumVerified, setChecksumVerified] = useState(false);
   const [fileName, setFileName] = useState('');
   const [backup, setBackup] = useState<BackupData | null>(null);
   const [restoring, setRestoring] = useState(false);
@@ -62,6 +66,7 @@ export function JsonRestore({ onRestoreComplete }: { onRestoreComplete?: () => v
   const toast = useToast();
 
   const resetSelection = () => {
+    selectionId.current += 1;
     setFileName('');
     setBackup(null);
     if (inputRef.current) inputRef.current.value = '';
@@ -71,6 +76,7 @@ export function JsonRestore({ onRestoreComplete }: { onRestoreComplete?: () => v
     setError(null);
     setVerifiedCounts(null);
     resetSelection();
+    const currentSelection = selectionId.current;
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.json')) {
       setError('รองรับเฉพาะไฟล์ Backup นามสกุล .json');
@@ -83,26 +89,32 @@ export function JsonRestore({ onRestoreComplete }: { onRestoreComplete?: () => v
 
     try {
       const json: unknown = JSON.parse(await file.text());
+      if (currentSelection !== selectionId.current) return;
       const parsed = backupDataSchema.safeParse(json);
       if (!parsed.success) {
-        setError('โครงสร้าง JSON ไม่ตรงกับ Backup ที่ระบบรองรับ กรุณาเลือกไฟล์ที่ดาวน์โหลดจาก My Port v2');
+        const issue = parsed.error.issues[0];
+        setError(`ไฟล์ Backup ไม่ผ่านการตรวจสอบ (${issue.path.join('.') || 'ไฟล์'}): ${issue.message}`);
         return;
       }
+      setSourceSchema(parsed.data.schema_version);
+      setChecksumVerified(Boolean(parsed.data.manifest?.content_checksum));
       setFileName(file.name);
       setBackup(completeBackupData(parsed.data));
     } catch {
+      if (currentSelection !== selectionId.current) return;
       setError('ไม่สามารถอ่านไฟล์ JSON ได้ กรุณาตรวจว่าไฟล์ไม่เสียหาย');
     }
   };
 
   const handleRestore = async () => {
-    if (!backup) return;
+    if (!backup || restoreInFlight.current) return;
     const counts = getBackupCategoryCounts(backup);
     const summary = BACKUP_CATEGORY_LABELS.map(([key, label]) => `${label} ${counts[key]}`).join(' · ');
     if (!confirm(
-      `ยืนยัน Restore ข้อมูลจาก ${fileName}?\n\n${summary}\n\nข้อมูลทั้ง 7 หมวดในบัญชีปัจจุบันจะถูกแทนที่ให้ตรงกับไฟล์นี้`,
+      `ยืนยัน Restore ข้อมูลจาก ${fileName}?\n\n${summary}\n\nข้อมูลทั้ง ${BACKUP_CATEGORY_LABELS.length} หมวดในบัญชีปัจจุบันจะถูกแทนที่ให้ตรงกับไฟล์นี้ รวมบัญชีธนาคาร หมวดที่ไม่มีข้อมูลในไฟล์จะถูกล้าง`,
     )) return;
 
+    restoreInFlight.current = true;
     setRestoring(true);
     setError(null);
     setVerifiedCounts(null);
@@ -113,13 +125,18 @@ export function JsonRestore({ onRestoreComplete }: { onRestoreComplete?: () => v
       if (!result.success) throw new Error('Server ตอบกลับไม่ครบตามรูปแบบการตรวจรับ');
       setVerifiedCounts(result.data.counts);
       resetSelection();
-      await onRestoreComplete?.();
-      toast.show('Restore และตรวจสอบข้อมูลครบทั้ง 7 หมวดแล้ว', 'success');
+      try {
+        await onRestoreComplete?.();
+      } catch {
+        setError('Restore สำเร็จแล้ว แต่รีเฟรชหน้าจอไม่สำเร็จ กรุณาโหลดหน้าใหม่');
+      }
+      toast.show(`Restore และตรวจสอบข้อมูลครบทั้ง ${BACKUP_CATEGORY_LABELS.length} หมวดแล้ว`, 'success');
     } catch (caught: unknown) {
       const message = caught instanceof Error ? caught.message : 'Restore ข้อมูลไม่สำเร็จ';
       setError(message);
       toast.show(message, 'error');
     } finally {
+      restoreInFlight.current = false;
       setRestoring(false);
     }
   };
@@ -135,8 +152,9 @@ export function JsonRestore({ onRestoreComplete }: { onRestoreComplete?: () => v
         </p>
         <div className="operation-message operation-warning" style={{ marginTop: '0', marginBottom: '16px' }}>
           {isOfflineMode
-            ? 'ระบบ Local จะ Restore ทั้ง 7 หมวดใน Transaction เดียว หากตรวจไม่ผ่านฐานข้อมูลจะ Rollback อัตโนมัติ โดยไม่แก้ไข Activity Log เดิม'
-            : 'ระบบจะสร้าง Recovery Snapshot ฝั่ง Server ก่อน แล้วแทนที่ข้อมูลทั้ง 7 หมวดให้ตรงกับไฟล์ หากตรวจไม่ผ่านจะย้อนกลับข้อมูลเดิมอัตโนมัติ โดยไม่แก้ไข Activity Log เดิม'}
+            ? 'ระบบ Local จะ Restore ทั้ง 8 หมวดรวมบัญชีธนาคารใน Transaction เดียว หากตรวจไม่ผ่านฐานข้อมูลจะ Rollback อัตโนมัติ โดยไม่แก้ไข Activity Log เดิม'
+            : 'ระบบจะสร้าง Recovery Snapshot ฝั่ง Server ก่อน แล้วแทนที่ข้อมูลทั้ง 8 หมวดรวมบัญชีธนาคารให้ตรงกับไฟล์ หากตรวจไม่ผ่านจะย้อนกลับข้อมูลเดิมอัตโนมัติ โดยไม่แก้ไข Activity Log เดิม'}
+          <div>ไฟล์เก่าที่ไม่มีบัญชีธนาคารจะถือว่าหมวดนี้ว่าง และล้างบัญชีธนาคารปัจจุบันเมื่อยืนยัน Restore</div>
         </div>
 
         {!isFirebaseConfigured && !isOfflineMode ? (
@@ -160,10 +178,15 @@ export function JsonRestore({ onRestoreComplete }: { onRestoreComplete?: () => v
                 <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '12px' }}>
                   <strong style={{ color: 'var(--text-primary)' }}>{fileName}</strong>
                   {' · '}เวอร์ชัน {backup.version}
-                  {' · '}Schema v{backup.schema_version}
+                  {' · '}Schema ต้นฉบับ {sourceSchema ? `v${sourceSchema}` : 'ไม่ระบุ (ไฟล์เก่า)'}
                   {' · '}วันที่ Backup {backup.exported_at.slice(0, 10)}
                 </div>
                 <CountsGrid counts={getBackupCategoryCounts(backup)} />
+                <div className="operation-message operation-success" style={{ marginTop: '12px' }}>
+                  {checksumVerified
+                    ? '✓ โครงสร้าง จำนวนข้อมูล และ checksum ผ่านการตรวจสอบ'
+                    : '✓ โครงสร้างผ่านการตรวจสอบ · ไฟล์เก่าไม่มี checksum จึงตรวจความสมบูรณ์ของเนื้อหาส่วนนี้ไม่ได้'}
+                </div>
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginTop: '16px', flexWrap: 'wrap' }}>
                   <button
                     className="btn btn-primary"

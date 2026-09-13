@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS stocks (
   status TEXT NOT NULL,
   asset_type TEXT NOT NULL,
   port_type TEXT NOT NULL DEFAULT 'Private',
+  country TEXT NOT NULL DEFAULT 'THAI',
+  platform_trade TEXT,
   risk_category TEXT,
   dividend_per_share NUMERIC DEFAULT 0,
   expected_dividend_per_year NUMERIC DEFAULT 0,
@@ -22,7 +24,9 @@ CREATE TABLE IF NOT EXISTS stocks (
 ALTER TABLE stocks ADD COLUMN IF NOT EXISTS graph_url TEXT;
 ALTER TABLE stocks ADD COLUMN IF NOT EXISTS link_url TEXT;
 ALTER TABLE stocks ADD COLUMN IF NOT EXISTS expected_dividend_per_year NUMERIC DEFAULT 0;
+ALTER TABLE stocks ADD COLUMN IF NOT EXISTS platform_trade TEXT;
 ALTER TABLE stocks ADD COLUMN IF NOT EXISTS risk_category TEXT;
+ALTER TABLE stocks ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 'THAI';
 ALTER TABLE stocks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 -- 2. Create buy_rounds table
@@ -41,8 +45,9 @@ CREATE TABLE IF NOT EXISTS buy_rounds (
 ALTER TABLE public.stocks
   DROP CONSTRAINT IF EXISTS stocks_symbol_key;
 
-CREATE UNIQUE INDEX IF NOT EXISTS stocks_symbol_port_type_key
-  ON public.stocks (UPPER(symbol), port_type);
+DROP INDEX IF EXISTS public.stocks_symbol_port_type_key;
+CREATE UNIQUE INDEX IF NOT EXISTS stocks_symbol_port_country_key
+  ON public.stocks (UPPER(symbol), port_type, UPPER(country));
 
 ALTER TABLE buy_rounds ADD COLUMN IF NOT EXISTS note TEXT;
 ALTER TABLE buy_rounds ADD COLUMN IF NOT EXISTS link_url TEXT;
@@ -299,6 +304,29 @@ CREATE POLICY "Enable all access for cash_transactions" ON cash_transactions
 
 CREATE INDEX IF NOT EXISTS idx_cash_transactions_date
   ON cash_transactions(transaction_date DESC, created_at DESC);
+
+-- 13. Bank accounts and account types
+CREATE TABLE IF NOT EXISTS bank_accounts (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  account_name TEXT,
+  bank_name TEXT,
+  account_number TEXT,
+  account_type TEXT NOT NULL DEFAULT 'Private' CHECK (account_type IN ('Business', 'Private')),
+  balance NUMERIC NOT NULL DEFAULT 0 CHECK (balance >= 0),
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE bank_accounts ALTER COLUMN account_name DROP NOT NULL;
+ALTER TABLE bank_accounts ALTER COLUMN bank_name DROP NOT NULL;
+
+ALTER TABLE bank_accounts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Enable all access for bank_accounts" ON bank_accounts
+  FOR ALL USING (true) WITH CHECK (true);
+
+CREATE INDEX IF NOT EXISTS idx_bank_accounts_type ON bank_accounts(account_type);
 
 -- 13. Recalculate moving-average cost and realized profit by transaction date.
 CREATE OR REPLACE FUNCTION public.recalculate_stock_trade_history(target_stock_id UUID)

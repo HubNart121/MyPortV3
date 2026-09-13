@@ -19,6 +19,9 @@ services:
       - ./docker/db/08-offline-files.sql:/docker-entrypoint-initdb.d/08-offline-files.sql:ro
       - ./docker/db/09-offline-restore.sql:/docker-entrypoint-initdb.d/09-offline-restore.sql:ro
       - ./docker/db/10-activity-logs.sql:/docker-entrypoint-initdb.d/10-activity-logs.sql:ro
+      - ./docker/db/11-bank-accounts.sql:/docker-entrypoint-initdb.d/11-bank-accounts.sql:ro
+      - ./docker/db/12-stock-country.sql:/docker-entrypoint-initdb.d/12-stock-country.sql:ro
+      - ./docker/db/13-platform-trade.sql:/docker-entrypoint-initdb.d/13-platform-trade.sql:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]

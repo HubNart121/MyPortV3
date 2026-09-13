@@ -1,3 +1,4 @@
+import { waitForBestEffort } from '../best-effort';
 import {
   addDoc,
   collection,
@@ -70,6 +71,10 @@ export async function pruneActivityLogs(): Promise<void> {
 }
 
 export async function recordActivityLog(input: ActivityLogInput): Promise<void> {
+  await waitForBestEffort(() => writeActivityLog(input), 'Activity log write');
+}
+
+async function writeActivityLog(input: ActivityLogInput): Promise<void> {
   try {
     const payload = {
       created_at: new Date().toISOString(),
@@ -88,7 +93,7 @@ export async function recordActivityLog(input: ActivityLogInput): Promise<void> 
       if (error) throw error;
     }
 
-    await pruneActivityLogs().catch((error) => {
+    void pruneActivityLogs().catch((error) => {
       console.warn('Activity log prune failed:', error);
     });
   } catch (error) {
@@ -97,7 +102,7 @@ export async function recordActivityLog(input: ActivityLogInput): Promise<void> 
 }
 
 export async function fetchActivityLogs(maxRows = DEFAULT_ACTIVITY_LOG_LIMIT): Promise<ActivityLog[]> {
-  await pruneActivityLogs().catch((error) => {
+  void pruneActivityLogs().catch((error) => {
     console.warn('Activity log prune failed:', error);
   });
 
