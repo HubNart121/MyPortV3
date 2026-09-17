@@ -1,13 +1,13 @@
 'use client';
 
-import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { fetchGlobalHistory } from '@/lib/services/portfolioService';
+import { assignMissingHistoryPlatform, fetchGlobalHistory } from '@/lib/services/portfolioService';
 import { formatCurrency, formatNumber, formatThaiDate } from '@/lib/calculations';
 import { downloadTradingHistoryExcel } from '@/lib/tradingHistoryExcel';
 import { PortBadge } from '@/components/Badges';
-import { ToastContainer } from '@/components/Toast';
+import { ToastContainer, useToast } from '@/components/Toast';
 
 interface UnifiedTransaction {
   id: string;
@@ -25,6 +25,9 @@ interface UnifiedTransaction {
 }
 
 export default function HistoryPage() {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [isAssigningPlatform, setIsAssigningPlatform] = useState(false);
   const { data, isLoading, error } = useQuery({
     queryKey: ['global-history'],
     queryFn: fetchGlobalHistory,
@@ -78,6 +81,20 @@ export default function HistoryPage() {
     return unified.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [data]);
 
+  const assignStreaming = async () => {
+    setIsAssigningPlatform(true);
+    try {
+      const count = await assignMissingHistoryPlatform('streaming');
+      await queryClient.invalidateQueries({ queryKey: ['global-history'] });
+      await queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      toast.show(count > 0 ? `บันทึก streaming ให้หุ้น History ${count} รายการแล้ว` : 'หุ้น History ระบุ PlatformTrade ครบแล้ว', 'success');
+    } catch (caught) {
+      toast.show(caught instanceof Error ? caught.message : 'บันทึก PlatformTrade ไม่สำเร็จ', 'error');
+    } finally {
+      setIsAssigningPlatform(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)' }}>
@@ -102,6 +119,10 @@ export default function HistoryPage() {
             <div className="page-title">TRADING HISTORY</div>
             <div className="page-subtitle">ประวัติการซื้อขายทั้งหมดเรียงตามวันเวลา</div>
           </div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button type="button" className="btn" onClick={assignStreaming} disabled={isAssigningPlatform || history.length === 0}>
+            {isAssigningPlatform ? 'กำลังบันทึก...' : 'ตั้งรายการที่ยังไม่ระบุเป็น streaming'}
+          </button>
           <button
             type="button"
             className="btn btn-primary"
@@ -110,6 +131,7 @@ export default function HistoryPage() {
           >
             ⇩ Report Excel
           </button>
+          </div>
         </div>
 
         {history.length === 0 ? (

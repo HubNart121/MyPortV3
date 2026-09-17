@@ -463,3 +463,45 @@ export async function fetchGlobalHistory() {
     ),
   };
 }
+
+export async function assignMissingHistoryPlatform(platform: string): Promise<number> {
+  const normalizedPlatform = platform.trim();
+  if (!normalizedPlatform) throw new Error('กรุณาระบุ PlatformTrade');
+
+  const stocks = await fetchPortfolio();
+  const targets = stocks.filter((stock) =>
+    !stock.platform_trade?.trim()
+    && ((stock.buy_rounds?.length ?? 0) + (stock.realized_trades?.length ?? 0) > 0),
+  );
+  if (targets.length === 0) return 0;
+
+  if (!isFirebaseConfigured) {
+    const supabase = getSupabase();
+    for (const stock of targets) {
+      const { error } = await supabase
+        .from('stocks')
+        .update({ platform_trade: normalizedPlatform, updated_at: new Date().toISOString() })
+        .eq('id', stock.id);
+      if (error) throw error;
+    }
+  } else {
+    const batch = writeBatch(db!);
+    const updatedAt = new Date().toISOString();
+    targets.forEach((stock) => {
+      batch.set(userDocument('stocks', stock.id), {
+        platform_trade: normalizedPlatform,
+        updated_at: updatedAt,
+      }, { merge: true });
+    });
+    await batch.commit();
+  }
+
+  await recordActivityLog({
+    action: 'update',
+    category: 'stock',
+    target_label: normalizedPlatform,
+    summary: `กำหนด PlatformTrade ${normalizedPlatform} ให้หุ้น History ${targets.length} รายการ`,
+    metadata: { platform_trade: normalizedPlatform, stock_count: targets.length, source: 'history' },
+  });
+  return targets.length;
+}
